@@ -1,0 +1,47 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+*.csproj.user
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+[Bb]in/
+[Oo]bj/
+
+## NuGet
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+.nuget/
+
+## IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+## User secrets
+secrets.json
+
+## macOS
+.DS_Store
+Thumbs.db
+
+## Environment
+.env
+.env.*
+!.env.example
+
+## EF Core migrations are tracked (don't ignore)

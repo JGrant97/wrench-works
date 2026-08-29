@@ -1,0 +1,11 @@
+node_modules/
+.next/
+out/
+.env*.local
+!.env.local.example
+*.tsbuildinfo
+next-env.d.ts
+
+# Orval generated files are committed (they're part of the typed contract)
+# If you prefer to regenerate, uncomment:
+# src/api/generated/
