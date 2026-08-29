@@ -21,9 +21,12 @@ export function useApi<T>(key: string | null, config?: SWRConfiguration<T>) {
  * SWR-based data fetching with query params.
  *
  *   const { data } = useApiQuery<PaginatedList>('/api/customers', { page: '1', search: 'john' });
+ *
+ * Pass `null` as basePath to skip the request entirely (SWR's conditional
+ * fetching idiom), e.g. `search.length >= 2 ? "/api/customers/search" : null`.
  */
 export function useApiQuery<T>(
-  basePath: string,
+  basePath: string | null,
   params?: Record<string, string | undefined>,
   config?: SWRConfiguration<T>
 ) {
@@ -34,7 +37,8 @@ export function useApiQuery<T>(
     ? `?${new URLSearchParams(filtered as Record<string, string>).toString()}`
     : "";
 
-  return useSWR<T>(`${basePath}${qs}`, swrFetcher, {
+  // A null basePath must stay null — interpolating it would request "/null".
+  return useSWR<T>(basePath === null ? null : `${basePath}${qs}`, swrFetcher, {
     revalidateOnFocus: false,
     ...config,
   });

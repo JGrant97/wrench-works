@@ -23,7 +23,8 @@ interface LaborLine {
 interface PartLine {
   id: string;
   inventoryItemId: string;
-  inventoryItemName: string;
+  itemName: string;
+  sku: string | null;
   quantity: number;
   unitPrice: number;
   total: number;
@@ -276,7 +277,7 @@ export default function JobDetailPage() {
             <tbody>
               {job.partLines.map((line) => (
                 <tr key={line.id} className="border-b border-surface-50">
-                  <td className="py-2">{line.inventoryItemName}</td>
+                  <td className="py-2">{line.itemName}</td>
                   <td className="py-2 text-right">{line.quantity}</td>
                   <td className="py-2 text-right">{formatCurrency(line.unitPrice)}</td>
                   <td className="py-2 text-right font-medium">{formatCurrency(line.total)}</td>

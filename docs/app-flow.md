@@ -1,0 +1,230 @@
+# How Wrench Works actually works
+
+Written from a live walkthrough of the running app (logged in as an Admin of the `GRAutomotive` business), cross-checked against the source. Companion to `CLAUDE.md`, which holds the rules; this file holds the mechanics.
+
+---
+
+## What it is
+
+Multi-tenant SaaS for vehicle workshops. One business = one tenant. A tenant has staff (users with roles), workshop bays (zones), customers, those customers' vehicles, an inventory of parts, a calendar of bookings, and jobs that tie it all together. Billing is per-business via Stripe, and the plan gates both limits (user/zone counts) and features (inventory, messaging).
+
+---
+
+## The request path
+
+Every screen in the dashboard is a client component. Nothing in the dashboard fetches on the server.
+
+```
+Browser (client component)
+   │  useApi("/api/jobs")            ← SWR, hooks/use-api.ts
+   ▼
+Next.js route handler  /api/[...path]/route.ts
+   │  proxy() reads httpOnly ww_token cookie
+   │  attaches Authorization: Bearer <jwt>
+   ▼
+.NET API  http://localhost:5000/api/jobs
+   │  JWT validated → CurrentUserService → ITenantProvider
+   │  EF global query filter injects BusinessId
+   ▼
+PostgreSQL
+```
+
+Key points:
+
+- **The browser never sees the JWT.** It lives in the `ww_token` httpOnly cookie. The proxy is what turns a cookie into a bearer token, which is why the frontend can't call `:5000` directly.
+- **Paths are 1:1.** `proxy()` forwards `url.pathname` unchanged, so `/api/jobs` on the web maps to `/api/jobs` on the API. The only reason the catch-all exists is the cookie→bearer hop.
+- **More specific route handlers win.** `src/app/api/auth/*` (login, logout, me, refresh, register, verify-email) shadow the catch-all because they need to *set* cookies, not just forward.
+- **A second, currently unused path exists.** `src/lib/api-client.ts` is the Orval mutator — same cookie→bearer trick, but for generated client functions called from server components. 109 generated files, zero imports. See `CLAUDE.md` for the migration intent.
+
+### Failure modes worth recognising
+
+| Symptom | Meaning |
+|---|---|
+| `502 {"code":"proxy_error"}` | Web is up, .NET API is unreachable |
+| `401` through the proxy | API is up, token missing/expired — the deny-by-default `FallbackPolicy` |
+| `500 {"code":"internal_error"}` on every data call, `/health` still 200 | Postgres is down. `/health` doesn't check the DB |
+
+---
+
+## Auth and session lifecycle
+
+```
+POST /api/auth/register     → creates Business + User + BusinessUser + Admin role
+                              + BusinessSubscription (Trial, 14 days, all features)
+                              + seeds 5 system roles and 19 permissions
+                              → emails a verification token (ConsoleEmailSender in dev)
+POST /api/auth/verify-email → flips User.EmailVerified
+POST /api/auth/login        → 403 while unverified; otherwise returns { token, user }
+POST /api/auth/refresh      → new JWT (requires an authenticated call)
+```
+
+On successful login the **route handler**, not the API, sets two cookies (`lib/session.ts`):
+
+| Cookie | httpOnly | Holds | Read by |
+|---|---|---|---|
+| `ww_token` | **yes** | the JWT | `proxy()` / `apiClient` server-side |
+| `ww_user` | no | id, name, email, businessId, businessName, permissions, features | `use-auth` on the client |
+
+Both expire after 24h, matching the JWT.
+
+`use-auth` hydrates a Zustand store from `ww_user`. That store is the *only* source for UI gating — the client never decodes the JWT. So **the client's view of permissions is a cookie the user could edit**; it controls what's rendered, never what's allowed. Enforcement is entirely server-side via `RequireAuthorization("jobs.edit")`.
+
+---
+
+## Authorization
+
+Two independent axes, easy to confuse:
+
+**Permissions** — what your *role* lets you do. `<resource>.<action>`, 19 of them, seeded per business into 5 system roles (Admin, Advisor, Technician, Inventory, ReadOnly). Server-side: `.RequireAuthorization("jobs.edit")` → `PermissionAuthorizationHandler`. Client-side: `usePermission("customers.manage")` to show/hide controls.
+
+**Features** — what your *plan* includes (`inventory`, `messaging`). Stored on `BusinessSubscription`, baked into the JWT at login, surfaced as `useFeature()` / `<FeatureGate>`.
+
+Server-side, features are enforced **not** by the permission system but by an `AddEndpointFilter` on the route group, which short-circuits with `403 { code: "feature_disabled" }`. Only two groups have one — `Inventory` (checks `inventory`) and `Messaging` (checks `messaging`) — and they are the only two features that exist. A new plan-gated feature needs its own filter on its group; nothing enforces this by convention.
+
+A Technician on an Enterprise plan still can't edit billing; an Admin on a plan without messaging still can't message. Both checks are needed.
+
+---
+
+## Multi-tenancy
+
+`BusinessScopedEntity` + one explicit `HasQueryFilter` line per entity in `AppDbContext.OnModelCreating`. The filter reads `_currentBusinessId == null || e.BusinessId == _currentBusinessId`, where `_currentBusinessId` comes from the JWT's `business_id` claim via `ITenantProvider`.
+
+The `== null` branch is deliberate — it's what lets anonymous auth endpoints query `Users` before a tenant exists. It also means **any code path without tenant context sees every tenant's rows**.
+
+Filters are registered one entity at a time, so a new `BusinessScopedEntity` has *no* isolation until you add its line. Six entities have DbSets but no filter (`JobLaborLine`, `JobPartLine`, `JobAssignment`, `BusinessUserRole`, `RolePermission`, `InventoryCategory`) — EF warns about five of them (`10622`) on every startup. Those are safe only when reached via a filtered parent. `TenantIsolationTests` verifies the job line-item endpoints do exactly that.
+
+---
+
+## Domain model
+
+```
+Business ─┬─ BusinessUser ──── User            (membership; a User can join several)
+          │       └─ BusinessUserRole ── Role ── RolePermission ── Permission
+          ├─ BusinessSubscription                (plan, limits, feature flags)
+          ├─ Zone                                (workshop bay, has capacity)
+          ├─ Customer ── Vehicle
+          ├─ Booking            → Zone, Job?     (calendar entry)
+          ├─ Job ──┬─ JobLaborLine               (description, hours, rate)
+          │        ├─ JobPartLine → InventoryItem (decrements stock)
+          │        └─ JobAssignment → BusinessUser
+          ├─ InventoryItem ─── StockMovement     (audit trail of stock deltas)
+          ├─ OutboundMessage, MessageTemplate
+          └─ AuditLog
+
+InventoryCategory ── global, shared by every business (236 seeded)
+```
+
+---
+
+## Coverage — how much of this is actually verified
+
+This document is not yet a complete description of the system, and it should not be read as one. Depth varies by area. Keep this table honest as coverage grows; it is what stops a future session trusting a section that was only skimmed.
+
+| Area | Depth | What that means |
+|---|---|---|
+| Auth, session, cookies | **Verified** | Read end to end, exercised by logging in and by `AuthTests` |
+| Multi-tenancy / query filters | **Verified** | Read end to end, proven by `TenantIsolationTests` (3 tests) |
+| Error middleware | **Verified** | All exception types read; validation path confirmed in-browser |
+| Jobs (list, detail, labor, parts) | **Verified** | Source read, exercised in browser, 4 bugs found and fixed |
+| Bookings / calendar | **Verified** | Source read; created bookings, hit the 409 conflict path, confirmed no edit/drag |
+| Customers (list, detail) | **Verified** | Source read and exercised; `recentJobs` gap found |
+| Vehicles (add, edit, detail, search) | **Verified** | Both modals and endpoint read; validation path exercised in-browser |
+| Inventory — items, categories, adjust | **Verified** | All 7 endpoints and both modals read; Adjust Stock exercised in-browser (invalid-reason path); stock guards confirmed in source. **Add Item modal read but never submitted** |
+| Settings — general, zones, users, billing | **Partial** | All four pages loaded and read; **no form submitted**, invite flow untested |
+| Billing / Stripe | **Not examined** | Plan cards render; checkout, portal and webhook paths never traced or run |
+| Messaging | **Deferred** | Endpoints exist (`send`, list, `retry`) with **no UI at all**. Explicitly deprioritised by the project owner (28 Aug 2026) — not an oversight; don't spend time here without being asked |
+| Users / roles / invite | **Verified** | Endpoints read and exercised by `UserAccessTests`; two defects found and pinned (`/me` 401, invite dead end) |
+| Zones | **Partial** | Endpoints and validators read (create/update only, no delete — deactivate via `IsActive`); CRUD never exercised in-browser |
+| Job assignments | **Not examined** | `JobAssignment` entity exists; no UI found for it |
+
+## Screens
+
+| Route | Component type | Calls | Notes |
+|---|---|---|---|
+| `/` | server | — | redirects to `/login` or `/calendar` |
+| `/login`, `/register`, `/verify-email` | client | `/api/auth/*` route handlers | the only cookie-setting paths |
+| `/calendar` | client | `/api/calendar/bookings?from=&to=`, `/api/zones` | landing page. Week/Month, zone filter. Create + cancel only — **no drag-to-move, no edit**; see [bookings-crud.md](bookings-crud.md) |
+| `/jobs` | client | `/api/jobs?page=&pageSize=&status=&search=` | list + status filter + search |
+| `/jobs/[id]` | client | `/api/jobs/{id}`, `/api/zones`, `/api/inventory/items` | the real workhorse — see below |
+| `/jobs/new` | client | `/api/customers/search`, `/api/customers/{id}` | customer → vehicle → job |
+| `/customers`, `/customers/[id]` | client | `/api/customers*` | detail shows vehicles + history |
+| `/vehicles` | client | `/api/customers/search` | **no list endpoint exists** — search-driven by design |
+| `/vehicles/[id]` | client | `/api/vehicles/{id}`, `/{id}/history` | service history |
+| `/inventory` | client | `/api/inventory/items`, `/categories` | stock levels, low-stock flag, adjustments |
+| `/settings/general` | client | `/api/business` | name, phone, address, timezone, currency |
+| `/settings/zones` | client | `/api/zones` | bays + capacity |
+| `/settings/users` | client | `/api/users`, `/api/users/invite` | roles per member |
+| `/settings/billing` | client | `/api/billing/subscription`, `/checkout`, `/portal` | plan cards → Stripe Checkout |
+
+**Messaging has API endpoints but no UI.** `/api/messaging` (send, list, retry) is fully implemented server-side with no page and no nav entry.
+
+### The job detail page
+
+This is where the domain logic lives. Actions are gated by status:
+
+```
+Draft ─→ Scheduled ─→ InProgress ─→ Completed ─→ Invoiced ─→ Closed
+                          ↕
+                     WaitingParts
+```
+
+On an open job you get Edit, a status-transition button (e.g. **Waiting Parts**, **Complete**), **Reschedule**, **Add Labor**, **Add Part**, and per-line delete. On `Completed`/`Invoiced`/`Closed` the mutating controls disappear, and the API independently rejects edits — `"Cannot modify a {status} job"`.
+
+Adding a part decrements `InventoryItem.StockOnHand` and writes a `StockMovement`; removing one returns the stock and writes the reverse movement. Totals are computed server-side in `JobDetailDto` (`laborTotal`, `partsTotal`, `grandTotal`).
+
+---
+
+## Bugs found during this walkthrough
+
+### Fixed
+
+Four of these shared a root cause: **pages hand-declare TypeScript interfaces for API responses, and some of them were wrong.** Nothing checks a hand-written interface against the real contract, so TypeScript compiled happily and the errors surfaced as garbage on screen.
+
+1. **`£NaN` on every row of `/jobs`.** The page renders `formatCurrency(job.laborTotal + job.partsTotal)`, but `JobListItemDto` carried neither field → `undefined + undefined` → `NaN`. **Fixed server-side**: `JobListItemDto` now includes `LaborTotal` / `PartsTotal`, summed in the list projection the same way `GetAsync` computes them. The column was clearly intended — the vehicle service-history view had been showing those totals correctly all along.
+2. **Blank part names on job detail.** The page read `line.inventoryItemName`; `PartLineDto` returns `itemName`. **Fixed web-side** (interface + render, and `sku` added since the DTO carries it).
+3. **"0 customers" above a populated list.** The jobs and customers list endpoints return `{ items, total, page, pageSize }`, but those two pages read `data.totalCount`. **Fixed web-side.** Note the inventory page was *not* affected — it reads `data.total` correctly.
+4. **Pagination never rendered on jobs or customers.** Same cause as #3: `Math.ceil(undefined / pageSize)` → `NaN`, and `NaN > 1` is `false`, so the Prev/Next block was permanently hidden and nothing past record 20 was reachable. **Fixed** by the same change.
+5. **Every conditional query fired a real request to `/null`.** `useApiQuery` typed `basePath` as `string` and interpolated it into a template literal, so callers using SWR's conditional-fetch idiom (`search.length >= 2 ? "/api/customers/search" : null`) produced the key `"null"` and a live `GET /null → 404`. This also made `npm run build` fail with five type errors. **Fixed** in `hooks/use-api.ts`: `basePath` is now `string | null` and a null short-circuits to a null SWR key.
+
+### Still open
+
+- **The `sub` claim never arrives, so `CurrentUserService.UserId` is always null.** ASP.NET's JwtBearer handler remaps inbound standard claims unless told not to, so the `sub` emitted by `JwtTokenService` reaches the app as `ClaimTypes.NameIdentifier`. The custom claims (`business_id`, `business_user_id`, `permission`, `feature`) are untouched, which is exactly why tenancy and authorization work and nobody noticed. Two effects: `/api/users/me` 401s for **everyone** (`RequireUserId()` throws), and every `CreatedByUserId` audit column is written null — confirmed across all 20 rows in the dev database. One-line fix: `options.MapInboundClaims = false`. Pinned by `UserAccessTests`.
+
+- **The invite flow is a dead end.** Invited memberships are created `Pending`; login requires `Active` and 403s otherwise; nothing anywhere transitions between them. The invite returns 201 and sends an email to an account that can never sign in. Pinned by `UserAccessTests`.
+
+- **`/api/users/me` is also inside a group requiring `users.manage`**, so even after the claim fix a non-admin could not read their own profile. Nothing calls it today — `/api/auth/me` is the only caller and nothing in the web app calls *that*; the session hydrates entirely from the `ww_user` cookie. Both are dead code until someone wires them up.
+
+- **The client never re-verifies identity after login.** `useAuth` reads permissions and features from the readable `ww_user` cookie and never calls the server again. If an admin changes someone's role, that user's UI keeps the old permissions until the 24h cookie expires. The server still rejects the actions, so this is a display-consistency issue rather than a hole — but there is no way to refresh a session short of logging out.
+
+- **Validation errors are unreadable in the UI, everywhere.** `ErrorHandlingMiddleware` returns validation failures as `{ code, errors: [{ field, message }] }` with **no top-level `message`**, while `ApiError` (`lib/fetcher.ts`) reads only `data.message` and otherwise falls back to `` `Request failed with status ${status}` ``. Every *other* exception type in that middleware emits `message`, so validation is the single case that hits the fallback — and the case where the user most needs the text. Verified in the browser: a 20-character VIN on Add Vehicle returned `{"code":"validation_error","errors":[{"field":"Vin","message":"The length of 'Vin' must be 17 characters or fewer. You entered 20 characters."}]}` and the toast read "Request failed with status 400". This silently degrades **every form in the product**; fixing `ApiError` to read `errors[]` fixes all of them at once.
+
+- **`recentJobs` on customer detail is always empty.** The page expects a `recentJobs` array, but `CustomerDetailDto` never returns one. Unlike the others this isn't a naming mismatch — the field doesn't exist server-side, so fixing it means adding jobs to the DTO and its query.
+- **Status badges render the raw enum** (`InProgress`, `WaitingParts`) while the filter dropdown shows them spaced ("In Progress"). `JOB_STATUS_COLORS` is keyed on the raw values, so what's missing is a display-label map.
+- **`npm run lint` is not configured.** It drops into an interactive ESLint setup prompt, so there is no working lint gate.
+- **The category dropdown loads all 236 categories inline** on every inventory render (~18 KB of `<option>`s). Fine at this size, not a pattern to scale.
+
+- **Two of the four Adjust Stock reasons are invalid and always fail.** The dropdown in `AdjustStockModal` offers Manual Adjustment, **Restock**, Damaged, **Returned**. The `StockMovementReason` enum is `ManualAdjustment, JobConsumption, JobReturn, PurchaseReceived, Correction, Damaged, Other` — so `Restock` and `Returned` don't exist and `Enum.TryParse` rejects them. Verified in-browser: selecting Restock returns 400 and the toast reads "Invalid reason"; stock and the movement log are untouched. The enum values the UI *should* offer for those two are `PurchaseReceived` and `JobReturn`; `Correction` and `Other` are never offered at all. Half the stock-adjustment UI is dead.
+
+- **Adding a vehicle captures less than editing one.** `CreateVehicleRequest` accepts `EngineType`, `FuelType` and `Notes`, and the edit modal on `/vehicles/[id]` exposes all three — but `AddVehicleModal` (`customers/[id]/page.tsx`) has only Make, Model, Year, Registration, VIN. The only route to engine/fuel/notes is create → navigate → Edit.
+
+- **A vehicle can be created entirely blank.** No field in `AddVehicleModal` carries `required` (the codebase does use it — customer Name, twice), and `CreateVehicleValidator` asserts only `CustomerId` not-empty plus max lengths on Vin (17) and Registration (20). An empty submit creates a real row; the list renders it as "Unnamed" via `[make, model].filter(Boolean).join(" ") || "Unnamed"`, so it degrades gracefully but is still junk data attachable to jobs and bookings. `Year` likewise has no bounds on either side.
+
+- **Duplicate registrations are allowed.** `VehicleConfiguration` declares `HasIndex(e => new { e.BusinessId, e.Registration })` — indexed for lookup, deliberately **not** `IsUnique()` — and `CreateAsync` performs no duplicate check. The customer create path *does* check for duplicate phone/email, so the pattern exists in the codebase and simply wasn't applied here. Two records for one plate splits a vehicle's service history silently.
+
+### Why the Orval migration doesn't fix this class of bug *yet*
+
+The obvious conclusion is "use the generated client and these become compile errors". That is **not true today**, and it's worth understanding why before relying on it.
+
+Minimal API handlers here return `Task<IResult>` and `Results.Ok(new { ... })` with anonymous objects. Minimal APIs can't infer a response type from that, so the OpenAPI document has no response schema:
+
+```json
+"/api/jobs": { "get": { "responses": { "200": { "description": "OK" } } } }
+```
+
+Orval faithfully generates `apiClient<void>(...)` for every one. Request bodies *are* typed (`CreateJobRequest` is `$ref`'d, because those are typed parameters) — responses are not. So migrating a page to the generated client today would give you `void` back and catch none of bugs 1–4.
+
+For the migration to deliver what it promises, the API has to declare its response types first — `.Produces<T>(200)` on each endpoint, or returning `TypedResults.Ok(dto)` with named response records instead of anonymous objects. **That is the prerequisite**, and it's the highest-leverage change available: it would make this entire bug class impossible rather than merely fixed once.
+
+## Still undecided
+
+**`InventoryCategory` is global.** 236 categories are seeded and shared across every business, and `CreateCategoryAsync` checks name uniqueness across all tenants — so once any business creates "Brakes", every other business gets a 409. The size and generality of the seeded taxonomy (a full automotive parts list) suggests the sharing is deliberate; the cross-tenant 409 on user-created categories looks like an unintended consequence of it. Confirm intent before changing either.

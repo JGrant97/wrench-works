@@ -22,7 +22,7 @@ interface Customer {
 
 interface CustomerListResponse {
   items: Customer[];
-  totalCount: number;
+  total: number;
   page: number;
   pageSize: number;
 }
@@ -40,13 +40,13 @@ export default function CustomersPage() {
   });
 
   const customers = data?.items ?? [];
-  const totalPages = data ? Math.ceil(data.totalCount / data.pageSize) : 1;
+  const totalPages = data ? Math.ceil(data.total / data.pageSize) : 1;
 
   return (
     <>
       <PageHeader
         title="Customers"
-        description={`${data?.totalCount ?? 0} customers`}
+        description={`${data?.total ?? 0} customers`}
         actions={
           canManage ? (
             <Button onClick={() => setShowCreate(true)}>

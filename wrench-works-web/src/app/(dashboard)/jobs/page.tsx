@@ -26,7 +26,7 @@ interface Job {
 
 interface JobListResponse {
   items: Job[];
-  totalCount: number;
+  total: number;
   page: number;
   pageSize: number;
 }
@@ -57,7 +57,7 @@ export default function JobsPage() {
   });
 
   const jobs = data?.items ?? [];
-  const totalPages = data ? Math.ceil(data.totalCount / data.pageSize) : 1;
+  const totalPages = data ? Math.ceil(data.total / data.pageSize) : 1;
 
   return (
     <>

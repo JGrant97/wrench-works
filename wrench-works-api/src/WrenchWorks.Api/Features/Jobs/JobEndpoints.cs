@@ -14,7 +14,7 @@ public record UpdateJobStatusRequest(string Status);
 public record AddPartToJobRequest(Guid InventoryItemId, decimal Quantity, decimal? UnitPriceOverride);
 public record AddLaborLineRequest(string Description, decimal Hours, decimal Rate);
 
-public record JobListItemDto(Guid Id, string Title, string Status, string Priority, string CustomerName, string? VehicleDisplay, string? ZoneName, DateTime? ScheduledStartUtc, DateTime CreatedAtUtc);
+public record JobListItemDto(Guid Id, string Title, string Status, string Priority, string CustomerName, string? VehicleDisplay, string? ZoneName, DateTime? ScheduledStartUtc, decimal LaborTotal, decimal PartsTotal, DateTime CreatedAtUtc);
 public record JobDetailDto(
     Guid Id, string Title, string Status, string Priority,
     Guid CustomerId, string CustomerName,
@@ -89,7 +89,10 @@ public static class JobEndpoints
                 j.Customer.Name,
                 (j.Vehicle.Make ?? "") + " " + (j.Vehicle.Model ?? "") + " " + (j.Vehicle.Registration ?? ""),
                 j.AssignedZone != null ? j.AssignedZone.Name : null,
-                j.ScheduledStartUtc, j.CreatedAtUtc))
+                j.ScheduledStartUtc,
+                j.LaborLines.Sum(l => l.Hours * l.Rate),
+                j.PartLines.Sum(p => p.Quantity * p.UnitPrice),
+                j.CreatedAtUtc))
             .ToListAsync(ct);
 
         return Results.Ok(new { items, total, page, pageSize });

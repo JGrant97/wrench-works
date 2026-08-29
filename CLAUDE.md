@@ -9,6 +9,15 @@ Wrench Works — workshop management SaaS. Two independent projects in one repo 
 
 They are separate solutions/packages — always `cd` into the right one before running commands.
 
+### Companion docs — imported, always in context
+
+The two files below are **imported** at the end of this file, so their full contents load with it every session. You do not need to open them, and you should not re-derive what they already record. They are project memory, not reference reading:
+
+- **[docs/app-flow.md](docs/app-flow.md)** — how a request travels from a component to the database, the auth/session lifecycle, the permission vs. feature split, the domain model, a screen-by-screen map, and every bug found by actually running the app (fixed and open).
+- **[docs/bookings-crud.md](docs/bookings-crud.md)** — the state of booking CRUD, what's missing, verified behaviour of conflict detection and the timezone handling, and a proposed build order.
+
+Because they are always loaded, keeping them accurate is not optional — see "Keeping this file and the companion docs current" at the end of this file. A stale line in an imported doc is a wrong fact in every future session.
+
 ---
 
 ## Tech stack
@@ -69,7 +78,11 @@ dotnet build
 dotnet test
 ```
 
-`dotnet test` requires Docker to be running — Testcontainers spins up a real `postgres:16-alpine` per test fixture.
+`dotnet test` requires Docker to be running — Testcontainers spins up a real `postgres:16-alpine` per test fixture (separate from the dev database, so tests never touch dev data).
+
+**Stop the API before running tests.** On Windows a running `dotnet run` holds a lock on `WrenchWorks.Domain.dll` / `WrenchWorks.Infrastructure.dll`, and the test build fails with `MSB3027 / MSB3021: the file is locked by "WrenchWorks.Api"`. That error means "shut the API down and re-run", not anything about the tests.
+
+**The test project has no `GlobalUsings.cs` and `ImplicitUsings` doesn't cover xunit.** Every test file needs `using Xunit;` explicitly, plus `using System.Net.Http.Json;` for `PostAsJsonAsync` / `ReadFromJsonAsync`. Omitting them produces a wall of `CS0246: 'Fact' could not be found`-style errors that look like a broken package reference but aren't.
 
 Scalar API docs (Development only): http://localhost:5000/scalar/v1 · OpenAPI doc: http://localhost:5000/openapi/v1.json
 
@@ -92,12 +105,12 @@ npm run build
 ```
 
 ```bash
-npm run lint
-```
-
-```bash
 npm run generate-api
 ```
+
+`npm run build` is the verification gate — it type-checks, and `npm run lint` is currently unconfigured (it opens an interactive ESLint setup prompt, so don't put it in a script or CI without fixing it first).
+
+**Never run `npm run build` while `npm run dev` is running.** They share `.next`, and the production build overwrites the dev server's chunks — the running app then 404s on every `_next/static/*` request until you restart the dev server. Stop dev, build, restart dev.
 
 There is no test runner in the web app. Do not add Jest/Vitest/Playwright without asking.
 
@@ -181,6 +194,8 @@ These exception types are declared in `Middleware/ErrorHandlingMiddleware.cs`. R
 
 **Times are UTC.** Fields are named `...Utc` (`ScheduledStartUtc`, `CreatedAtUtc`); keep that convention and convert for display only in the UI.
 
+**`Business.Timezone` is stored but never used.** It's editable on `/settings/general` and nothing reads it — every date renders in the *browser's* timezone. Verified: a booking entered as 09:00 on a UTC-5 machine stores as `14:00Z`, so a business configured as `UTC` sees a different time than the person who booked it. Self-consistent within one browser, wrong across two. Settle this before adding more write paths — see [docs/bookings-crud.md](docs/bookings-crud.md).
+
 **Web UI conventions.** Build on the primitives in `src/components/ui` (Radix + Tailwind); compose classes with the `cn()` helper in `@/lib/utils`. Forms use react-hook-form with a Zod resolver. Toasts via react-hot-toast, icons via lucide-react. Don't introduce a competing UI, form, or data-fetching library.
 
 **Feature and permission gating** in the UI uses `use-permission`, `use-feature`, and `<FeatureGate>` — reuse them rather than reading the session cookie directly.
@@ -205,15 +220,33 @@ Verified against the code — these are the places where the codebase and the ru
 
 **`/health` does not check the database.** It returns a static `{ status = "healthy" }` and never touches `AppDbContext`. Verified: with Postgres stopped, a running API still returns `200 healthy` while every data endpoint returns `500 internal_error`. It is a liveness probe only — do not treat it as a readiness check, and don't wire it to anything that decides whether the API can serve traffic.
 
-**Unfiltered child entities.** `JobLaborLine`, `JobPartLine`, `JobAssignment`, `BusinessUserRole`, `RolePermission`, and `InventoryCategory` have DbSets but **no** `HasQueryFilter` line, so querying those sets directly crosses tenants. EF emits five model-validation warnings (`10622`) about exactly this on every startup. Reaching them through a filtered parent (`db.Jobs.Include(j => j.LaborLines)`) is safe; `db.JobLaborLines.Where(...)` is not. `RemovePartAsync` / `RemoveLaborAsync` in `JobEndpoints.cs` load lines from the unfiltered set and rely on `db.Jobs.FindAsync(id)` for the tenant check — **whether that is actually safe is unverified**, since `FindAsync` can return a change-tracker hit. Verify with a cross-tenant test before trusting it.
+**Unfiltered child entities.** `JobLaborLine`, `JobPartLine`, `JobAssignment`, `BusinessUserRole`, `RolePermission`, and `InventoryCategory` have DbSets but **no** `HasQueryFilter` line, so querying those sets directly crosses tenants. EF emits five model-validation warnings (`10622`) about exactly this on every startup. Reaching them through a filtered parent (`db.Jobs.Include(j => j.LaborLines)`) is safe; `db.JobLaborLines.Where(...)` is not.
+
+The job line-item endpoints load lines from those unfiltered sets and rely on a separate `db.Jobs.FindAsync(id)` for the tenant check. **Verified safe** by `TenantIsolationTests` — `FindAsync` does honour the global query filter, so a cross-tenant read, delete, or append all return 404 and leave the data untouched. The isolation is real but *indirect*: it lives in that parent lookup, not in the line entity. If you refactor those handlers, keep the parent-job check, and keep those tests green.
 
 **`RemovePartAsync` null-handling bug.** It does `db.Jobs.FindAsync([id], ct)!` then dereferences `job!.Status`. A missing or filtered-out job gives a `NullReferenceException` → `500 internal_error` instead of a 404. `RemoveLaborAsync` two methods below handles the same case correctly with `?? throw new NotFoundException(...)`.
 
 **Known-vulnerable packages.** The build reports `NU1903` high-severity advisories for `Microsoft.OpenApi` 2.0.0-preview.11 and `Microsoft.Build.Tasks.Core` 17.7.2. Also `NU1603`: `Infrastructure` asks for EF Core `10.0.0-preview.3.25171.7`, which does not exist on the feed, so NuGet silently resolves `preview.4.25258.110` instead — the pinned versions are not the versions you get.
 
+**Environment quirks that cost time once already.** `jq` is **not installed** — use `node` for JSON in scripts and hooks (that's why `.claude/hooks/docs-reminder.mjs` is a Node script). In the Bash tool, backslashes in single-quoted strings and heredocs get mangled, so build JSON test payloads with the Write tool rather than `echo`. When driving the app in the browser, `ref_N`-based clicks resolve to wrong coordinates on this project's modals — click by screenshot coordinate instead, and note `form_input` on `datetime-local` and `<textarea>` fields silently no-ops roughly half the time, so read back and retry.
+
 **No CI, no formatter, no analyzer gate.** There's no `.github/workflows`, no `.editorconfig`, and no `dotnet format` step. Build and test discipline is manual — actually run the commands.
 
-**Backend test coverage is one file.** `AuthTests.cs` covers health, register, and login. Every other slice — jobs, calendar conflict detection, billing, inventory, multi-tenancy isolation — has no tests. Rule 6 applies to new endpoints; the existing gap is unfilled backlog.
+**Backend test coverage is thin.** Two files, 7 tests: `AuthTests.cs` (health, register, duplicate email, unverified login) and `TenantIsolationTests.cs` (cross-tenant read/delete/append on job labor lines). Calendar conflict detection, billing, inventory, stock movements, and messaging have no tests. Rule 6 applies to new endpoints; the rest is unfilled backlog.
+
+`TenantIsolationTests` is the template for tenant-boundary tests: register two businesses through `/api/auth/register`, flip `EmailVerified` directly in the DB (login is blocked until verified, and the token otherwise only reaches `ConsoleEmailSender`), log both in, then assert across the boundary. Assert on the **stored rows** as well as the status code — a handler that returns 404 but still deleted the row would pass a status-only check.
+
+**The generated Orval client has typed requests but `void` responses.** Handlers return `Task<IResult>` with `Results.Ok(new { ... })` anonymous objects, which minimal APIs cannot infer a response type from, so the OpenAPI doc carries no response schema (`"200": { "description": "OK" }`) and Orval emits `apiClient<void>(...)` for every call. **Migrating a page to the generated client today would therefore not catch a single response-shape bug.** The prerequisite is declaring response types on the API — `.Produces<T>(200)` or `TypedResults.Ok(dto)` with named response records instead of anonymous objects. Until that lands, rules 1–3 buy consistency, not type safety.
+
+**`CurrentUserService.UserId` is ALWAYS null — every audit column is unwritten.** `JwtTokenService` emits a `sub` claim, but the JwtBearer handler remaps inbound standard claims by default (`MapInboundClaims` is never set to false in `Program.cs`), so `sub` arrives as `ClaimTypes.NameIdentifier` and `FindFirstValue("sub")` returns null. Custom claim names — `business_id`, `business_user_id`, `permission`, `feature` — are *not* remapped, which is why tenancy and permissions work perfectly and this went unnoticed. Two consequences, both verified: **`/api/users/me` returns 401 for everyone including Admins**, and **`Job.CreatedByUserId`, `Booking.CreatedByUserId` and `StockMovement.CreatedByUserId` are null on every row ever created** (8/8 bookings, 8/8 jobs, 4/4 movements in the dev database). Fix is one line — `options.MapInboundClaims = false` — but note it makes `UserId` start working, so check anything that silently tolerated null. Pinned by `UserAccessTests`.
+
+**Invited users can never log in.** `InviteAsync` creates the membership with `Status = Pending`; `LoginEndpoint` only loads `BusinessUsers` where `Status == Active` and returns 403 "No active business membership" otherwise. Nothing in the API or the UI transitions Pending → Active, so the invite flow is a dead end — the invite succeeds, the email sends, and the account is permanently locked out. The four existing dev users are all Active, so they did not arrive this way. Needs an accept-invite path. Pinned by `UserAccessTests`.
+
+**Validation errors are invisible to users, in every form.** The middleware returns `{ code, errors: [{ field, message }] }` with no top-level `message`; `ApiError` in `lib/fetcher.ts` reads only `data.message` and falls back to "Request failed with status 400". Verified in-browser. FluentValidation's message is generated, sent, and thrown away. One fix in `ApiError` (read `errors[]`) repairs every form at once — highest value-per-line change currently known.
+
+**`recentJobs` on customer detail is always empty** — the page expects the field, `CustomerDetailDto` never returns it. Needs an API change, not a rename.
+
+**`npm run lint` is not configured** — it drops into an interactive ESLint setup prompt. There is no working lint gate; `npm run build` (which type-checks) is the real one.
 
 **Some handlers return ad-hoc error bodies.** e.g. `CreateCategoryAsync` returns `Results.BadRequest(new { code, message })` directly instead of throwing. New code should throw the middleware's exception types.
 
@@ -224,5 +257,48 @@ Verified against the code — these are the places where the codebase and the ru
 - Nullable reference types and implicit usings are on in every project. Don't introduce new nullability warnings.
 - **The API build is not warning-clean:** `GenerateDocumentationFile=true` on `WrenchWorks.Api` with no XML doc comments produces ~324 `CS1591` warnings on every build. They're noise, and they bury real warnings. Don't try to silence them by writing XML comments across every DTO; if this gets fixed, the fix is `<NoWarn>$(NoWarn);CS1591</NoWarn>` in the csproj (or dropping `GenerateDocumentationFile`). Until then, when checking a build, filter them: `dotnet build 2>&1 | grep -v CS1591`.
 - Prefer `record` types for DTOs, as the existing slices do.
-- After backend changes: `dotnet build` and `dotnet test`. After web changes: `npm run lint` and `npm run build`. Report failures with the real output rather than glossing over them.
+- After backend changes: `dotnet build` and `dotnet test`. After web changes: `npm run build` (not `npm run lint` — see above). Report failures with the real output rather than glossing over them.
 - If a change spans both projects, finish the loop: API → `npm run generate-api` → update the web code.
+
+---
+
+## Keeping this file and the companion docs current
+
+**These three files are the project's memory.** `CLAUDE.md`, `docs/app-flow.md` and `docs/bookings-crud.md` record things the source cannot tell you: behaviour verified by running the app, decisions and their reasons, traps that cost someone an hour, and questions still open. A stale entry here is worse than no entry — it produces confident, wrong work.
+
+Updating them is part of finishing a task, not an optional extra. Do it in the same turn as the change.
+
+### The rule that matters most: revise, never delete
+
+**When a finding stops being true, move it to a resolved state — keep the finding, its root cause, and what changed.** Never quietly delete it.
+
+The bugs section of `app-flow.md` is the worked example: when four response-shape bugs were fixed, they moved under a **Fixed** heading, each keeping its symptom, its root cause, and a note of the fix; the ones that remained moved under **Still open**. Nothing was lost, and the root-cause pattern — hand-written interfaces drifting from the real contract — stayed visible, which is the part that prevents a repeat.
+
+Delete an entry only when it was *wrong*, and then say so plainly rather than erasing it (this file already carries several corrections written that way).
+
+### Triggers
+
+| When you | Update |
+|---|---|
+| Change an endpoint, DTO, route or permission | `app-flow.md` — screen table and/or the request-path section |
+| Add, remove or restructure a page or route | `app-flow.md` — screen table |
+| Fix a bug listed in a doc | Move it to **Fixed** with its root cause; do not delete |
+| Find a new bug, trap or surprising behaviour | Add it, with how you verified it |
+| Answer one of the open questions | Replace the question with the answer **and the evidence**, and note who decided |
+| Touch bookings or the calendar | `bookings-crud.md` — the state table and the build order |
+| Migrate a page to the generated client, or off `useApiQuery` | `CLAUDE.md` rules 3–4 "Current state" callouts, and `app-flow.md`'s screen table |
+| Add a response type (`.Produces<T>` / `TypedResults`) | The Orval `void`-responses entry — that's the blocker being lifted |
+| Learn a command, gotcha or environment fact the hard way | `CLAUDE.md` — Commands or Known gaps |
+
+### Standard of evidence
+
+State how you know. "Verified by running X", "confirmed in the browser", "from reading the source" and "assumed" are four different claims, and mixing them up is how this file becomes untrustworthy. If something is unverified, **say so** — `PUT /bookings/{id}/move` is documented as written-but-never-executed for exactly this reason. Date anything time-sensitive.
+
+---
+
+## Imported project memory
+
+The two files below are loaded in full with this one. Treat their contents as part of these instructions.
+
+@docs/app-flow.md
+@docs/bookings-crud.md
