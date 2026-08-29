@@ -21,16 +21,40 @@ They are separate solutions/packages — always `cd` into the right one before r
 
 ## Commands
 
+### Starting the stack — always do this first
+
+**The API cannot boot without Postgres** (it runs migrations at startup and crashes otherwise). So before running or restarting the API, make sure the database is actually up, and start it if it isn't. Don't report a connection-refused crash back to the user as a blocker — bring Postgres up and carry on.
+
+1. **Is the Docker daemon running?** `docker info` — if it errors, start Docker Desktop and wait for it, then continue:
+
+```bash
+powershell -NoProfile -Command "Start-Process 'C:\Program Files\Docker\Docker\Docker Desktop.exe'"
+```
+
+Give it time — the daemon typically takes 30–60s to accept connections. Poll `docker info` until it succeeds rather than assuming a fixed delay. Starting Docker Desktop is fine to do unprompted; it's a local dev dependency.
+
+2. **Is Postgres up?** From `wrench-works-api`, this is idempotent — it starts the container if stopped and returns immediately if already healthy:
+
+```bash
+docker compose up postgres -d --wait
+```
+
+`--wait` blocks on the container's healthcheck, so when it returns the database is genuinely accepting connections, not merely started. The container is named `wrenchworks-db`; `docker inspect --format '{{.State.Health.Status}}' wrenchworks-db` gives its health directly.
+
+3. **Then** start the API and web app.
+
+If the API dies immediately on startup, check Postgres before debugging anything else — that is nearly always the cause.
+
 ### API (`cd wrench-works-api`)
 
 ```bash
 docker compose up --build
 ```
 
-Postgres + API together; API on http://localhost:5000. Or run Postgres only and the API from source:
+Postgres + API together; API on http://localhost:5000. Or Postgres only, with the API from source (the usual dev loop):
 
 ```bash
-docker compose up postgres -d
+docker compose up postgres -d --wait
 ```
 
 ```bash
@@ -163,7 +187,7 @@ These exception types are declared in `Middleware/ErrorHandlingMiddleware.cs`. R
 
 **Config.** Web: copy `.env.local.example` → `.env.local`. API: `appsettings.json` locally, `__`-delimited env vars in Docker (`ConnectionStrings__DefaultConnection`, `Jwt__Key`, `Cors__Origins__0`). The credentials in `docker-compose.yml` are dev-only; never reuse them anywhere real, and never commit a live `Jwt:Key` or Stripe secret.
 
-**.NET 10 is on preview packages.** Don't "fix" the ASP.NET Core preview version numbers to stable ones — they're pinned deliberately.
+**.NET 10 is on preview packages.** Local SDK is 10.0.400. Don't casually "fix" the ASP.NET Core preview version numbers to stable ones. Note that the EF Core pins in `Infrastructure` don't resolve to what they claim — see the `NU1603` note in Known gaps.
 
 ---
 
@@ -177,6 +201,16 @@ Verified against the code — these are the places where the codebase and the ru
 
 **OPEN QUESTION — `InventoryCategory` tenancy.** It extends `BaseEntity`, not `BusinessScopedEntity`, and has no `HasQueryFilter` line, so categories are shared across every business. `CreateCategoryAsync` (`Features/Inventory/InventoryEndpoints.cs`) then checks name uniqueness with `IgnoreQueryFilters()` globally, so once any business creates "Brakes", every other business gets a 409 and can never create their own. It is undecided whether the shared taxonomy is deliberate or a cross-tenant defect. **Do not "fix" or build on this without asking** — the fix (scope the entity, add a filter, add a migration, scope the uniqueness check) is a breaking data change.
 
+**The API cannot start without Postgres.** `Program.cs:145` calls `await db.Database.MigrateAsync()` outside any try/catch, so with the database down the app throws an unhandled `NpgsqlException` and exits before binding `:5000` — no graceful message. See "Starting the stack" above: bring Postgres up yourself, don't hand the crash back as a blocker.
+
+**`/health` does not check the database.** It returns a static `{ status = "healthy" }` and never touches `AppDbContext`. Verified: with Postgres stopped, a running API still returns `200 healthy` while every data endpoint returns `500 internal_error`. It is a liveness probe only — do not treat it as a readiness check, and don't wire it to anything that decides whether the API can serve traffic.
+
+**Unfiltered child entities.** `JobLaborLine`, `JobPartLine`, `JobAssignment`, `BusinessUserRole`, `RolePermission`, and `InventoryCategory` have DbSets but **no** `HasQueryFilter` line, so querying those sets directly crosses tenants. EF emits five model-validation warnings (`10622`) about exactly this on every startup. Reaching them through a filtered parent (`db.Jobs.Include(j => j.LaborLines)`) is safe; `db.JobLaborLines.Where(...)` is not. `RemovePartAsync` / `RemoveLaborAsync` in `JobEndpoints.cs` load lines from the unfiltered set and rely on `db.Jobs.FindAsync(id)` for the tenant check — **whether that is actually safe is unverified**, since `FindAsync` can return a change-tracker hit. Verify with a cross-tenant test before trusting it.
+
+**`RemovePartAsync` null-handling bug.** It does `db.Jobs.FindAsync([id], ct)!` then dereferences `job!.Status`. A missing or filtered-out job gives a `NullReferenceException` → `500 internal_error` instead of a 404. `RemoveLaborAsync` two methods below handles the same case correctly with `?? throw new NotFoundException(...)`.
+
+**Known-vulnerable packages.** The build reports `NU1903` high-severity advisories for `Microsoft.OpenApi` 2.0.0-preview.11 and `Microsoft.Build.Tasks.Core` 17.7.2. Also `NU1603`: `Infrastructure` asks for EF Core `10.0.0-preview.3.25171.7`, which does not exist on the feed, so NuGet silently resolves `preview.4.25258.110` instead — the pinned versions are not the versions you get.
+
 **No CI, no formatter, no analyzer gate.** There's no `.github/workflows`, no `.editorconfig`, and no `dotnet format` step. Build and test discipline is manual — actually run the commands.
 
 **Backend test coverage is one file.** `AuthTests.cs` covers health, register, and login. Every other slice — jobs, calendar conflict detection, billing, inventory, multi-tenancy isolation — has no tests. Rule 6 applies to new endpoints; the existing gap is unfilled backlog.
@@ -187,7 +221,8 @@ Verified against the code — these are the places where the codebase and the ru
 
 ## Working agreements
 
-- Nullable reference types and implicit usings are on in every project — keep the build warning-clean.
+- Nullable reference types and implicit usings are on in every project. Don't introduce new nullability warnings.
+- **The API build is not warning-clean:** `GenerateDocumentationFile=true` on `WrenchWorks.Api` with no XML doc comments produces ~324 `CS1591` warnings on every build. They're noise, and they bury real warnings. Don't try to silence them by writing XML comments across every DTO; if this gets fixed, the fix is `<NoWarn>$(NoWarn);CS1591</NoWarn>` in the csproj (or dropping `GenerateDocumentationFile`). Until then, when checking a build, filter them: `dotnet build 2>&1 | grep -v CS1591`.
 - Prefer `record` types for DTOs, as the existing slices do.
 - After backend changes: `dotnet build` and `dotnet test`. After web changes: `npm run lint` and `npm run build`. Report failures with the real output rather than glossing over them.
 - If a change spans both projects, finish the loop: API → `npm run generate-api` → update the web code.
