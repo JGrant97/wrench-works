@@ -10,6 +10,8 @@ namespace WrenchWorks.Api.Features.Calendar;
 // DTOs
 public record CreateBookingRequest(Guid ZoneId, Guid CustomerId, Guid VehicleId, string Title, DateTime StartUtc, DateTime EndUtc, string? Notes, bool CreateJob);
 public record MoveBookingRequest(Guid ZoneId, DateTime StartUtc, DateTime EndUtc);
+public record UpdateBookingRequest(Guid ZoneId, Guid CustomerId, Guid VehicleId, string Title, DateTime StartUtc, DateTime EndUtc, string? Notes);
+public record UpdateBookingStatusRequest(string Status);
 public record BookingDto(Guid Id, Guid ZoneId, string ZoneName, string? ZoneColor, Guid CustomerId, string CustomerName, Guid VehicleId, string? VehicleDisplay, string Title, DateTime StartUtc, DateTime EndUtc, string? Notes, string Status, Guid? JobId, DateTime CreatedAtUtc);
 
 public record GetBookingsQuery(DateTime From, DateTime To, Guid? ZoneId = null);
@@ -37,7 +39,9 @@ public static class CalendarEndpoints
 
         group.MapGet("/bookings", GetBookingsAsync).RequireAuthorization("calendar.view");
         group.MapPost("/bookings", CreateBookingAsync).RequireAuthorization("calendar.edit");
+        group.MapPut("/bookings/{id:guid}", UpdateBookingAsync).RequireAuthorization("calendar.edit");
         group.MapPut("/bookings/{id:guid}/move", MoveBookingAsync).RequireAuthorization("calendar.edit");
+        group.MapPatch("/bookings/{id:guid}/status", UpdateBookingStatusAsync).RequireAuthorization("calendar.edit");
         group.MapDelete("/bookings/{id:guid}", DeleteBookingAsync).RequireAuthorization("calendar.edit");
     }
 
@@ -61,7 +65,7 @@ public static class CalendarEndpoints
             .Select(b => new BookingDto(
                 b.Id, b.ZoneId, b.Zone.Name, b.Zone.Color,
                 b.CustomerId, b.Customer.Name,
-                b.VehicleId, (b.Vehicle.Make ?? "") + " " + (b.Vehicle.Model ?? "") + " " + (b.Vehicle.Registration ?? ""),
+                b.VehicleId, (b.Vehicle.DisplayName ?? "") + (b.Vehicle.Registration != null ? " " + b.Vehicle.Registration : ""),
                 b.Title, b.StartUtc, b.EndUtc, b.Notes,
                 b.Status.ToString(), b.JobId, b.CreatedAtUtc))
             .ToListAsync(ct);
@@ -140,9 +144,111 @@ public static class CalendarEndpoints
         return Results.Created($"/api/calendar/bookings/{booking.Id}",
             new BookingDto(booking.Id, booking.ZoneId, zone.Name, zone.Color,
                 booking.CustomerId, customer.Name, booking.VehicleId,
-                $"{vehicle.Make} {vehicle.Model} {vehicle.Registration}".Trim(),
+                $"{vehicle.DisplayName} {vehicle.Registration}".Trim(),
                 booking.Title, booking.StartUtc, booking.EndUtc, booking.Notes,
                 booking.Status.ToString(), booking.JobId, booking.CreatedAtUtc));
+    }
+
+    /// <summary>
+    /// Full update of a booking — zone, customer, vehicle, title, times and notes.
+    ///
+    /// Until this existed a booking was immutable once created: the only way to change
+    /// a time was cancel-and-recreate, and cancelling CLOSES the linked job. So the most
+    /// routine event in a workshop (a job slipping a day) destroyed work.
+    ///
+    /// Shares conflict checking and the job cascade with /move, so the two cannot drift.
+    /// </summary>
+    private static async Task<IResult> UpdateBookingAsync(
+        Guid id,
+        UpdateBookingRequest request,
+        AppDbContext db,
+        CancellationToken ct)
+    {
+        var booking = await db.Bookings.FindAsync([id], ct)
+            ?? throw new NotFoundException("Booking not found");
+
+        if (booking.Status == BookingStatus.Cancelled)
+            throw new ConflictException("This booking was cancelled and can no longer be edited");
+
+        if (string.IsNullOrWhiteSpace(request.Title))
+            throw new ValidationException([new FluentValidation.Results.ValidationFailure(
+                nameof(request.Title), "Title is required")]);
+
+        if (request.StartUtc >= request.EndUtc)
+            throw new ValidationException([new FluentValidation.Results.ValidationFailure(
+                nameof(request.StartUtc), "Start must be before end")]);
+
+        var zone = await db.Zones.FindAsync([request.ZoneId], ct)
+            ?? throw new NotFoundException("Zone not found");
+        _ = await db.Customers.FindAsync([request.CustomerId], ct)
+            ?? throw new NotFoundException("Customer not found");
+        _ = await db.Vehicles.FindAsync([request.VehicleId], ct)
+            ?? throw new NotFoundException("Vehicle not found");
+
+        var conflicts = await CheckConflictsAsync(db, request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, id, ct);
+        if (conflicts.Count > 0)
+            throw new ConflictException("Booking conflicts detected", new { conflictingBookingIds = conflicts });
+
+        booking.ZoneId = request.ZoneId;
+        booking.CustomerId = request.CustomerId;
+        booking.VehicleId = request.VehicleId;
+        booking.Title = request.Title.Trim();
+        booking.StartUtc = request.StartUtc;
+        booking.EndUtc = request.EndUtc;
+        booking.Notes = request.Notes;
+
+        await CascadeToJobAsync(db, booking, request.ZoneId, request.StartUtc, request.EndUtc, ct);
+
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { message = "Booking updated" });
+    }
+
+    /// <summary>
+    /// Moves a booking to Completed or NoShow.
+    ///
+    /// BookingStatus has four values and the UI styles all four, but only Confirmed
+    /// (on create) and Cancelled (on delete) were ever reachable — the other two were
+    /// decorative. Cancelling still goes through DELETE, which also closes the job.
+    /// </summary>
+    private static async Task<IResult> UpdateBookingStatusAsync(
+        Guid id,
+        UpdateBookingStatusRequest request,
+        AppDbContext db,
+        CancellationToken ct)
+    {
+        var booking = await db.Bookings.FindAsync([id], ct)
+            ?? throw new NotFoundException("Booking not found");
+
+        if (!Enum.TryParse<BookingStatus>(request.Status, true, out var status))
+            throw new ValidationException([new FluentValidation.Results.ValidationFailure(
+                nameof(request.Status), $"'{request.Status}' is not a valid booking status")]);
+
+        // Cancelling has side effects on the linked job, so it stays on DELETE.
+        if (status == BookingStatus.Cancelled)
+            throw new ConflictException("Use DELETE to cancel a booking so the linked job is handled");
+
+        booking.Status = status;
+        await db.SaveChangesAsync(ct);
+
+        return Results.Ok(new { booking.Id, Status = booking.Status.ToString() });
+    }
+
+    // Keeps a linked job's schedule in step with its booking.
+    //
+    // NOTE: deliberately a plain comment, not an XML doc comment. The .NET 10 preview
+    // OpenAPI XML-comment source generator emits `System.Void` for a Task-returning
+    // (void) method carrying a <summary>, which fails to compile with CS0673.
+    private static async Task CascadeToJobAsync(
+        AppDbContext db, Booking booking, Guid zoneId, DateTime startUtc, DateTime endUtc, CancellationToken ct)
+    {
+        if (!booking.JobId.HasValue) return;
+
+        var job = await db.Jobs.FindAsync([booking.JobId.Value], ct);
+        if (job is null) return;
+
+        job.AssignedZoneId = zoneId;
+        job.ScheduledStartUtc = startUtc;
+        job.ScheduledEndUtc = endUtc;
     }
 
     private static async Task<IResult> MoveBookingAsync(
@@ -168,17 +274,7 @@ public static class CalendarEndpoints
         booking.StartUtc = request.StartUtc;
         booking.EndUtc = request.EndUtc;
 
-        // Update linked job schedule if exists
-        if (booking.JobId.HasValue)
-        {
-            var job = await db.Jobs.FindAsync([booking.JobId.Value], ct);
-            if (job != null)
-            {
-                job.AssignedZoneId = request.ZoneId;
-                job.ScheduledStartUtc = request.StartUtc;
-                job.ScheduledEndUtc = request.EndUtc;
-            }
-        }
+        await CascadeToJobAsync(db, booking, request.ZoneId, request.StartUtc, request.EndUtc, ct);
 
         await db.SaveChangesAsync(ct);
         return Results.Ok(new { message = "Booking moved successfully" });

@@ -10,6 +10,9 @@ import type {
   CreateCategoryRequest,
   CreateItemRequest,
   GetApiInventoryItemsParams,
+  InventoryCategoryDto,
+  InventoryItemDto,
+  PagedResultOfInventoryItemDto,
   UpdateItemRequest
 } from '.././models';
 
@@ -20,7 +23,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiInventoryCategories = (
     
  ) => {
-      return apiClient<void>(
+      return apiClient<InventoryCategoryDto[]>(
       {url: `/api/inventory/categories`, method: 'GET'
     },
       );
@@ -38,7 +41,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiInventoryItems = (
     params?: GetApiInventoryItemsParams,
  ) => {
-      return apiClient<void>(
+      return apiClient<PagedResultOfInventoryItemDto>(
       {url: `/api/inventory/items`, method: 'GET',
         params
     },
@@ -57,7 +60,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiInventoryItemsId = (
     id: string,
  ) => {
-      return apiClient<void>(
+      return apiClient<InventoryItemDto>(
       {url: `/api/inventory/items/${id}`, method: 'GET'
     },
       );

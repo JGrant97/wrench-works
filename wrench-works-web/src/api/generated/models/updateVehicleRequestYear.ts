@@ -9,4 +9,4 @@
 /**
  * @pattern ^-?(?:0|[1-9]\d*)$
  */
-export type UpdateVehicleRequestYear = null | number | string;
+export type UpdateVehicleRequestYear = number | string;

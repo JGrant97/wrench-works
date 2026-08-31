@@ -76,45 +76,86 @@ public class UserAccessTests : IClassFixture<ApiFactory>
     }
 
     /// <summary>
-    /// DEFECT PINNED: /api/users/me returns 401 for everyone, including an Admin.
+    /// Regression guard for the "sub" claim.
     ///
-    /// JwtTokenService emits a "sub" claim, but the JwtBearer handler remaps inbound
-    /// standard claims by default, so "sub" arrives as ClaimTypes.NameIdentifier and
-    /// CurrentUserService.UserId — which reads FindFirstValue("sub") — is always null.
-    /// RequireUserId() then throws UnauthorizedAccessException, which the error
-    /// middleware maps to 401.
+    /// The JwtBearer handler remaps inbound standard claims unless told not to, so "sub"
+    /// used to arrive as ClaimTypes.NameIdentifier and CurrentUserService.UserId — which
+    /// reads FindFirstValue("sub") — was always null. RequireUserId() threw, and /me
+    /// returned 401 for everyone including admins. Fixed by MapInboundClaims = false.
     ///
-    /// Custom claim names (business_id, business_user_id, permission, feature) are not
-    /// remapped, which is why tenancy and permissions work and this went unnoticed.
-    ///
-    /// FIX: options.MapInboundClaims = false in the JwtBearer setup in Program.cs
-    /// (or read ClaimTypes.NameIdentifier in CurrentUserService).
-    /// When fixed, this should be 200 — update the assertion and docs/app-flow.md.
+    /// If this starts failing with 401, that setting has been lost.
     /// </summary>
     [Fact]
-    public async Task GetMe_Returns401_BecauseTheSubClaimIsRemapped()
+    public async Task GetMe_ReturnsTheCallersProfile()
     {
         var owner = await CreateBusinessWithOwnerAsync("b");
 
         var response = await owner.GetAsync("/api/users/me");
 
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
-            "CurrentUserService.UserId is always null, so RequireUserId() throws");
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "the sub claim must reach CurrentUserService.UserId");
     }
 
     /// <summary>
-    /// DEFECT PINNED: an invited user can never log in.
-    ///
-    /// InviteAsync creates the membership with Status = Pending. LoginEndpoint only
-    /// loads BusinessUsers where Status == Active and returns 403 "No active business
-    /// membership" when none is found. Nothing in the API or the UI transitions a
-    /// membership from Pending to Active, so the invite flow is a dead end.
-    ///
-    /// FIX: an activation path — accept-invite endpoint, or set Active on invite.
-    /// When fixed, the login below should succeed.
+    /// "/me" must not require users.manage — it was declared inside a group carrying that
+    /// policy, so only admins could read their own profile.
     /// </summary>
     [Fact]
-    public async Task InvitedUser_CannotLogIn_BecauseMembershipStaysPending()
+    public async Task GetMe_IsReadableByANonAdmin()
+    {
+        var owner = await CreateBusinessWithOwnerAsync("e");
+        var email = $"member-{Guid.NewGuid():N}@example.com";
+
+        var invite = await owner.PostAsJsonAsync("/api/users/invite", new
+        {
+            name = "ReadOnly Member",
+            email,
+            roleName = "ReadOnly"
+        });
+        invite.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        string token;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await db.Users.IgnoreQueryFilters()
+                .SingleAsync(u => u.NormalizedEmail == email.ToLowerInvariant());
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(Password);
+            token = user.EmailVerificationToken!;
+            await db.SaveChangesAsync();
+        }
+
+        (await _client.PostAsJsonAsync("/api/auth/verify-email", new { email, token }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var login = await _client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
+        login.StatusCode.Should().Be(HttpStatusCode.OK);
+        var memberToken = (await login.Content.ReadFromJsonAsync<LoginPayload>())!.Token;
+
+        var member = _factory.CreateClient();
+        member.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", memberToken);
+
+        (await member.GetAsync("/api/users")).StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "listing the team still requires users.manage");
+
+        (await member.GetAsync("/api/users/me")).StatusCode.Should().Be(HttpStatusCode.OK,
+            "but anyone may read their own profile");
+    }
+
+    /// <summary>
+    /// The invite flow works end to end, PROVIDED the invitee verifies their email.
+    ///
+    /// InviteAsync creates the membership as Pending and LoginEndpoint requires Active,
+    /// so it looks like a dead end — but VerifyEmailEndpoint activates every pending
+    /// membership for the user as part of verification. Verification is the gate, which
+    /// is why the invite email carries both the temporary password and the token.
+    ///
+    /// An earlier version of this test set EmailVerified directly in the database,
+    /// skipping the endpoint that performs the activation, and therefore "proved" a
+    /// defect that does not exist. Exercise the real endpoint.
+    /// </summary>
+    [Fact]
+    public async Task InvitedUser_CanLogIn_AfterVerifyingTheirEmail()
     {
         var owner = await CreateBusinessWithOwnerAsync("c");
         var email = $"invited-{Guid.NewGuid():N}@example.com";
@@ -125,36 +166,46 @@ public class UserAccessTests : IClassFixture<ApiFactory>
             email,
             roleName = "ReadOnly"
         });
-        invite.StatusCode.Should().Be(HttpStatusCode.Created, "the invite itself succeeds");
+        invite.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        // Give the invited account a known password and a verified email, so the ONLY
-        // remaining obstacle is the Pending membership.
+        // The invite emails a random temporary password we cannot read, so set a known
+        // one. Crucially we do NOT touch EmailVerified or the membership status — those
+        // are what the endpoint under test is responsible for.
+        string token;
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var user = await db.Users.IgnoreQueryFilters()
                 .SingleAsync(u => u.NormalizedEmail == email.ToLowerInvariant());
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(Password);
-            user.EmailVerified = true;
+            token = user.EmailVerificationToken!;
             await db.SaveChangesAsync();
         }
 
-        var login = await _client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
+        token.Should().NotBeNullOrEmpty("the invite issues a verification token");
 
-        login.StatusCode.Should().Be(HttpStatusCode.Forbidden,
-            "the membership is Pending and nothing can activate it");
+        // Before verification the membership is Pending, so login is refused.
+        var early = await _client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
+        early.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the email is not verified yet");
+
+        var verify = await _client.PostAsJsonAsync("/api/auth/verify-email", new { email, token });
+        verify.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var login = await _client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
+        login.StatusCode.Should().Be(HttpStatusCode.OK,
+            "verifying the email activates the pending membership");
     }
 
     /// <summary>
-    /// DEFECT PINNED: every CreatedByUserId audit column is written as null.
+    /// Audit columns must record who acted.
     ///
-    /// Same root cause as GetMe above — currentUser.UserId is always null, and it is
-    /// what stamps Job.CreatedByUserId, Booking.CreatedByUserId and
-    /// StockMovement.CreatedByUserId. Confirmed against the dev database: 8/8 bookings,
-    /// 8/8 jobs and 4/4 stock movements had a null CreatedByUserId.
+    /// Same root cause as GetMe: currentUser.UserId stamps Job.CreatedByUserId,
+    /// Booking.CreatedByUserId and StockMovement.CreatedByUserId, and while the "sub"
+    /// claim was unreadable every one of those was written null — verified across all
+    /// 20 rows of the dev database before the fix.
     /// </summary>
     [Fact]
-    public async Task CreatedByUserId_IsNull_BecauseUserIdClaimIsUnreadable()
+    public async Task CreatedByUserId_IsStamped_OnANewJob()
     {
         var owner = await CreateBusinessWithOwnerAsync("d");
 
@@ -162,7 +213,31 @@ public class UserAccessTests : IClassFixture<ApiFactory>
         customer.StatusCode.Should().Be(HttpStatusCode.Created);
         var customerId = (await customer.Content.ReadFromJsonAsync<IdOnly>())!.Id;
 
-        var vehicle = await owner.PostAsJsonAsync("/api/vehicles", new { customerId, make = "Ford", model = "Focus" });
+        // Vehicles are catalogue-backed: pick any seeded variant.
+        var makes = await owner.GetFromJsonAsync<List<CatalogueEntry>>("/api/catalogue/makes") ?? [];
+        makes.Should().NotBeEmpty("VehicleCatalogueSeeder should have run at startup");
+
+        Guid variantId = Guid.Empty;
+        var year = 0;
+        foreach (var make in makes)
+        {
+            var models = await owner.GetFromJsonAsync<List<CatalogueEntry>>($"/api/catalogue/makes/{make.Id}/models") ?? [];
+            foreach (var model in models)
+            {
+                var years = await owner.GetFromJsonAsync<List<int>>($"/api/catalogue/models/{model.Id}/years") ?? [];
+                if (years.Count == 0) continue;
+                var variants = await owner.GetFromJsonAsync<List<CatalogueEntry>>(
+                    $"/api/catalogue/models/{model.Id}/variants?year={years[0]}") ?? [];
+                if (variants.Count == 0) continue;
+                variantId = variants[0].Id;
+                year = years[0];
+                break;
+            }
+            if (variantId != Guid.Empty) break;
+        }
+        variantId.Should().NotBe(Guid.Empty, "the seeded catalogue should contain at least one variant");
+
+        var vehicle = await owner.PostAsJsonAsync("/api/vehicles", new { customerId, variantId, year });
         vehicle.StatusCode.Should().Be(HttpStatusCode.Created);
         var vehicleId = (await vehicle.Content.ReadFromJsonAsync<IdOnly>())!.Id;
 
@@ -180,9 +255,10 @@ public class UserAccessTests : IClassFixture<ApiFactory>
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var created = await db.Jobs.IgnoreQueryFilters().SingleAsync(j => j.Id == jobId);
 
-        created.CreatedByUserId.Should().BeNull(
-            "the sub claim is remapped, so no user id ever reaches the audit column");
+        created.CreatedByUserId.Should().NotBeNull(
+            "the acting user's id must reach the audit column");
     }
 
     private sealed record IdOnly(Guid Id);
+    private sealed record CatalogueEntry(Guid Id, string Name);
 }

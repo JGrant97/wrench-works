@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
+using WrenchWorks.Api.Features.Common;
 using WrenchWorks.Api.Middleware;
 using WrenchWorks.Domain.Entities;
 using WrenchWorks.Infrastructure.Persistence;
@@ -47,8 +48,8 @@ public static class JobEndpoints
     {
         var group = app.MapGroup("/api/jobs").WithTags("Jobs").RequireAuthorization();
 
-        group.MapGet("/", ListAsync).RequireAuthorization("jobs.view");
-        group.MapGet("/{id:guid}", GetAsync).RequireAuthorization("jobs.view");
+        group.MapGet("/", ListAsync).RequireAuthorization("jobs.view").Produces<PagedResult<JobListItemDto>>();
+        group.MapGet("/{id:guid}", GetAsync).RequireAuthorization("jobs.view").Produces<JobDetailDto>();
         group.MapPost("/", CreateAsync).RequireAuthorization("jobs.create");
         group.MapPut("/{id:guid}", UpdateJobAsync).RequireAuthorization("jobs.edit");
         group.MapPatch("/{id:guid}/status", UpdateStatusAsync).RequireAuthorization("jobs.edit");
@@ -87,7 +88,7 @@ public static class JobEndpoints
             .Select(j => new JobListItemDto(
                 j.Id, j.Title, j.Status.ToString(), j.Priority.ToString(),
                 j.Customer.Name,
-                (j.Vehicle.Make ?? "") + " " + (j.Vehicle.Model ?? "") + " " + (j.Vehicle.Registration ?? ""),
+                (j.Vehicle.DisplayName ?? "") + (j.Vehicle.Registration != null ? " " + j.Vehicle.Registration : ""),
                 j.AssignedZone != null ? j.AssignedZone.Name : null,
                 j.ScheduledStartUtc,
                 j.LaborLines.Sum(l => l.Hours * l.Rate),
@@ -95,7 +96,7 @@ public static class JobEndpoints
                 j.CreatedAtUtc))
             .ToListAsync(ct);
 
-        return Results.Ok(new { items, total, page, pageSize });
+        return Results.Ok(new PagedResult<JobListItemDto>(items, total, page, pageSize));
     }
 
     private static async Task<IResult> GetAsync(Guid id, AppDbContext db, CancellationToken ct)
@@ -118,7 +119,7 @@ public static class JobEndpoints
             job.Id, job.Title, job.Status.ToString(), job.Priority.ToString(),
             job.CustomerId, job.Customer.Name,
             job.VehicleId,
-            $"{job.Vehicle.Make} {job.Vehicle.Model} {job.Vehicle.Registration}".Trim(),
+            $"{job.Vehicle.DisplayName} {job.Vehicle.Registration}".Trim(),
             job.AssignedZoneId, job.AssignedZone?.Name,
             job.InternalNotes, job.CustomerNotes,
             job.ScheduledStartUtc, job.ScheduledEndUtc,
@@ -138,6 +139,7 @@ public static class JobEndpoints
         var businessId = currentUser.RequireBusinessId();
         _ = await db.Customers.FindAsync([request.CustomerId], ct) ?? throw new NotFoundException("Customer not found");
         _ = await db.Vehicles.FindAsync([request.VehicleId], ct) ?? throw new NotFoundException("Vehicle not found");
+        await EnsureZoneIsOursAsync(db, request.ZoneId, ct);
 
         var job = new Job
         {
@@ -160,6 +162,23 @@ public static class JobEndpoints
         return Results.Created($"/api/jobs/{job.Id}", new { job.Id, job.Status });
     }
 
+    // Not a formatting nicety — an omitted zone check crossed tenants and then broke the
+    // calendar. CreateAsync and UpdateJobAsync validated CustomerId and VehicleId through
+    // the tenant-filtered DbSet but assigned AssignedZoneId with no lookup at all, so
+    // another business's zone GUID was accepted (the FK is satisfied at the database, and
+    // tenancy is never checked there). UpdateStatusAsync then auto-created a Booking on
+    // that foreign zone, and GetBookingsAsync projects b.Zone.Name unconditionally — the
+    // zone is filtered out for this tenant, so the projection dereferenced null and the
+    // whole calendar list 500'd. Reading through db.Zones applies the global query filter,
+    // so a foreign zone simply is not found. See docs/review-findings.md finding 2.
+    private static async Task EnsureZoneIsOursAsync(AppDbContext db, Guid? zoneId, CancellationToken ct)
+    {
+        if (!zoneId.HasValue) return;
+
+        var exists = await db.Zones.AnyAsync(z => z.Id == zoneId.Value, ct);
+        if (!exists) throw new NotFoundException("Zone not found");
+    }
+
     private static async Task<IResult> UpdateJobAsync(
         Guid id,
         UpdateJobRequest request,
@@ -180,6 +199,7 @@ public static class JobEndpoints
         job.InternalNotes = request.InternalNotes;
         job.CustomerNotes = request.CustomerNotes;
         job.Priority = priority;
+        await EnsureZoneIsOursAsync(db, request.ZoneId, ct);
         job.AssignedZoneId = request.ZoneId;
         job.ScheduledStartUtc = request.ScheduledStartUtc;
         job.ScheduledEndUtc = request.ScheduledEndUtc;

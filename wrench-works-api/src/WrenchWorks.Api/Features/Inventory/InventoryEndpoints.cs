@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
+using WrenchWorks.Api.Features.Common;
 using WrenchWorks.Api.Middleware;
 using WrenchWorks.Domain.Entities;
 using WrenchWorks.Infrastructure.Persistence;
@@ -39,10 +40,10 @@ public static class InventoryEndpoints
                 return await next(ctx);
             });
 
-        group.MapGet("/categories", ListCategoriesAsync).RequireAuthorization("inventory.view");
+        group.MapGet("/categories", ListCategoriesAsync).RequireAuthorization("inventory.view").Produces<List<InventoryCategoryDto>>();
         group.MapPost("/categories", CreateCategoryAsync).RequireAuthorization("inventory.manage");
-        group.MapGet("/items", ListItemsAsync).RequireAuthorization("inventory.view");
-        group.MapGet("/items/{id:guid}", GetItemAsync).RequireAuthorization("inventory.view");
+        group.MapGet("/items", ListItemsAsync).RequireAuthorization("inventory.view").Produces<PagedResult<InventoryItemDto>>();
+        group.MapGet("/items/{id:guid}", GetItemAsync).RequireAuthorization("inventory.view").Produces<InventoryItemDto>();
         group.MapPost("/items", CreateItemAsync).RequireAuthorization("inventory.manage");
         group.MapPut("/items/{id:guid}", UpdateItemAsync).RequireAuthorization("inventory.manage");
         group.MapPost("/items/{id:guid}/adjust", AdjustStockAsync).RequireAuthorization("inventory.manage");
@@ -99,7 +100,7 @@ public static class InventoryEndpoints
             .Select(i => new InventoryItemDto(i.Id, i.Name, i.Sku, i.CategoryId, i.Category != null ? i.Category.Name : null, i.UnitCost, i.RetailPrice, i.StockOnHand, i.ReorderThreshold, i.StockOnHand <= i.ReorderThreshold, i.CreatedAtUtc))
             .ToListAsync(ct);
 
-        return Results.Ok(new { items, total, page, pageSize });
+        return Results.Ok(new PagedResult<InventoryItemDto>(items, total, page, pageSize));
     }
 
     private static async Task<IResult> GetItemAsync(Guid id, AppDbContext db, CancellationToken ct)

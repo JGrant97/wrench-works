@@ -38,6 +38,12 @@ public class AppDbContext : DbContext
     public DbSet<BusinessSubscription> BusinessSubscriptions => Set<BusinessSubscription>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    // Vehicle catalogue — global reference data, deliberately NOT tenant-filtered.
+    public DbSet<VehicleMake> VehicleMakes => Set<VehicleMake>();
+    public DbSet<VehicleModel> VehicleModels => Set<VehicleModel>();
+    public DbSet<VehicleVariant> VehicleVariants => Set<VehicleVariant>();
+    public DbSet<VehicleColour> VehicleColours => Set<VehicleColour>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

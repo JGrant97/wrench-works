@@ -13,6 +13,14 @@ import { apiClient } from '../../../lib/api-client';
 
 
 
+  export const getApiUsersMe = (
+    
+ ) => {
+      return apiClient<void>(
+      {url: `/api/users/me`, method: 'GET'
+    },
+      );
+    }
   export const getApiUsers = (
     
  ) => {
@@ -31,14 +39,6 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
-  export const getApiUsersMe = (
-    
- ) => {
-      return apiClient<void>(
-      {url: `/api/users/me`, method: 'GET'
-    },
-      );
-    }
-  export type GetApiUsersResult = NonNullable<Awaited<ReturnType<typeof getApiUsers>>>
+  export type GetApiUsersMeResult = NonNullable<Awaited<ReturnType<typeof getApiUsersMe>>>
+export type GetApiUsersResult = NonNullable<Awaited<ReturnType<typeof getApiUsers>>>
 export type PostApiUsersInviteResult = NonNullable<Awaited<ReturnType<typeof postApiUsersInvite>>>
-export type GetApiUsersMeResult = NonNullable<Awaited<ReturnType<typeof getApiUsersMe>>>

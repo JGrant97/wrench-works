@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
+using WrenchWorks.Api.Features.Common;
 using WrenchWorks.Api.Middleware;
 using WrenchWorks.Domain.Entities;
 using WrenchWorks.Infrastructure.Persistence;
@@ -11,8 +12,9 @@ namespace WrenchWorks.Api.Features.Customers;
 public record CreateCustomerRequest(string Name, string? Phone, string? Email, string? Address, string? PreferredContactMethod, string? Notes);
 public record UpdateCustomerRequest(string Name, string? Phone, string? Email, string? Address, string? PreferredContactMethod, string? Notes);
 public record CustomerDto(Guid Id, string Name, string? Phone, string? Email, string? Address, string? PreferredContactMethod, string? Notes, int VehicleCount, DateTime CreatedAtUtc);
-public record CustomerDetailDto(Guid Id, string Name, string? Phone, string? Email, string? Address, string? PreferredContactMethod, string? Notes, IEnumerable<CustomerVehicleDto> Vehicles, DateTime CreatedAtUtc);
-public record CustomerVehicleDto(Guid Id, string? Make, string? Model, int? Year, string? Registration);
+public record CustomerDetailDto(Guid Id, string Name, string? Phone, string? Email, string? Address, string? PreferredContactMethod, string? Notes, IEnumerable<CustomerVehicleDto> Vehicles, IEnumerable<CustomerJobDto> RecentJobs, DateTime CreatedAtUtc);
+public record CustomerVehicleDto(Guid Id, string DisplayName, int? Year, string? Registration, string? ColourName);
+public record CustomerJobDto(Guid Id, string Title, string Status, string? VehicleDisplay, decimal Total, DateTime CreatedAtUtc);
 
 // Validators
 public class CreateCustomerValidator : AbstractValidator<CreateCustomerRequest>
@@ -32,8 +34,8 @@ public static class CustomerEndpoints
     {
         var group = app.MapGroup("/api/customers").WithTags("Customers").RequireAuthorization();
 
-        group.MapGet("/", ListAsync).RequireAuthorization("customers.view");
-        group.MapGet("/{id:guid}", GetAsync).RequireAuthorization("customers.view");
+        group.MapGet("/", ListAsync).RequireAuthorization("customers.view").Produces<PagedResult<CustomerDto>>();
+        group.MapGet("/{id:guid}", GetAsync).RequireAuthorization("customers.view").Produces<CustomerDetailDto>();
         group.MapPost("/", CreateAsync).RequireAuthorization("customers.manage");
         group.MapPut("/{id:guid}", UpdateAsync).RequireAuthorization("customers.manage");
         group.MapGet("/search", SearchAsync).RequireAuthorization("customers.view");
@@ -65,20 +67,38 @@ public static class CustomerEndpoints
             .Select(c => new CustomerDto(c.Id, c.Name, c.Phone, c.Email, c.Address, c.PreferredContactMethod, c.Notes, c.Vehicles.Count, c.CreatedAtUtc))
             .ToListAsync(ct);
 
-        return Results.Ok(new { items, total, page, pageSize });
+        return Results.Ok(new PagedResult<CustomerDto>(items, total, page, pageSize));
     }
 
     private static async Task<IResult> GetAsync(Guid id, AppDbContext db, CancellationToken ct)
     {
         var customer = await db.Customers
-            .Include(c => c.Vehicles)
+            .Include(c => c.Vehicles).ThenInclude(v => v.Colour)
             .FirstOrDefaultAsync(c => c.Id == id, ct)
             ?? throw new NotFoundException("Customer not found");
+
+        // The page has always rendered a "Recent Jobs" card; the DTO never carried the
+        // data, so it was permanently empty even for customers with a full history.
+        // Queried separately rather than Include'd: a customer's whole job history with
+        // line items would be a large graph to materialise just to show the last few.
+        var recentJobs = await db.Jobs
+            .Where(j => j.CustomerId == id)
+            .OrderByDescending(j => j.CreatedAtUtc)
+            .Take(10)
+            .Select(j => new CustomerJobDto(
+                j.Id,
+                j.Title,
+                j.Status.ToString(),
+                j.Vehicle.DisplayName,
+                j.LaborLines.Sum(l => l.Hours * l.Rate) + j.PartLines.Sum(p => p.Quantity * p.UnitPrice),
+                j.CreatedAtUtc))
+            .ToListAsync(ct);
 
         return Results.Ok(new CustomerDetailDto(
             customer.Id, customer.Name, customer.Phone, customer.Email,
             customer.Address, customer.PreferredContactMethod, customer.Notes,
-            customer.Vehicles.Select(v => new CustomerVehicleDto(v.Id, v.Make, v.Model, v.Year, v.Registration)),
+            customer.Vehicles.Select(v => new CustomerVehicleDto(v.Id, v.DisplayName ?? "", v.Year, v.Registration, v.Colour != null ? v.Colour.Name : null)),
+            recentJobs,
             customer.CreatedAtUtc));
     }
 

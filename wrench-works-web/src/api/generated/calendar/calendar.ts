@@ -8,7 +8,9 @@
 import type {
   CreateBookingRequest,
   GetApiCalendarBookingsParams,
-  MoveBookingRequest
+  MoveBookingRequest,
+  UpdateBookingRequest,
+  UpdateBookingStatusRequest
 } from '.././models';
 
 import { apiClient } from '../../../lib/api-client';
@@ -34,14 +36,14 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
-  export const putApiCalendarBookingsIdMove = (
+  export const putApiCalendarBookingsId = (
     id: string,
-    moveBookingRequest: MoveBookingRequest,
+    updateBookingRequest: UpdateBookingRequest,
  ) => {
       return apiClient<void>(
-      {url: `/api/calendar/bookings/${id}/move`, method: 'PUT',
+      {url: `/api/calendar/bookings/${id}`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
-      data: moveBookingRequest
+      data: updateBookingRequest
     },
       );
     }
@@ -53,7 +55,31 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
+  export const putApiCalendarBookingsIdMove = (
+    id: string,
+    moveBookingRequest: MoveBookingRequest,
+ ) => {
+      return apiClient<void>(
+      {url: `/api/calendar/bookings/${id}/move`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: moveBookingRequest
+    },
+      );
+    }
+  export const patchApiCalendarBookingsIdStatus = (
+    id: string,
+    updateBookingStatusRequest: UpdateBookingStatusRequest,
+ ) => {
+      return apiClient<void>(
+      {url: `/api/calendar/bookings/${id}/status`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: updateBookingStatusRequest
+    },
+      );
+    }
   export type GetApiCalendarBookingsResult = NonNullable<Awaited<ReturnType<typeof getApiCalendarBookings>>>
 export type PostApiCalendarBookingsResult = NonNullable<Awaited<ReturnType<typeof postApiCalendarBookings>>>
-export type PutApiCalendarBookingsIdMoveResult = NonNullable<Awaited<ReturnType<typeof putApiCalendarBookingsIdMove>>>
+export type PutApiCalendarBookingsIdResult = NonNullable<Awaited<ReturnType<typeof putApiCalendarBookingsId>>>
 export type DeleteApiCalendarBookingsIdResult = NonNullable<Awaited<ReturnType<typeof deleteApiCalendarBookingsId>>>
+export type PutApiCalendarBookingsIdMoveResult = NonNullable<Awaited<ReturnType<typeof putApiCalendarBookingsIdMove>>>
+export type PatchApiCalendarBookingsIdStatusResult = NonNullable<Awaited<ReturnType<typeof patchApiCalendarBookingsIdStatus>>>

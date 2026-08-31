@@ -7,13 +7,24 @@
  */
 import type {
   CreateVehicleRequest,
-  UpdateVehicleRequest
+  GetApiVehiclesSearchParams,
+  UpdateVehicleRequest,
+  VehicleSearchResultDto
 } from '.././models';
 
 import { apiClient } from '../../../lib/api-client';
 
 
 
+  export const getApiVehiclesSearch = (
+    params: GetApiVehiclesSearchParams,
+ ) => {
+      return apiClient<VehicleSearchResultDto[]>(
+      {url: `/api/vehicles/search`, method: 'GET',
+        params
+    },
+      );
+    }
   export const postApiVehicles = (
     createVehicleRequest: CreateVehicleRequest,
  ) => {
@@ -51,7 +62,8 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
-  export type PostApiVehiclesResult = NonNullable<Awaited<ReturnType<typeof postApiVehicles>>>
+  export type GetApiVehiclesSearchResult = NonNullable<Awaited<ReturnType<typeof getApiVehiclesSearch>>>
+export type PostApiVehiclesResult = NonNullable<Awaited<ReturnType<typeof postApiVehicles>>>
 export type PutApiVehiclesIdResult = NonNullable<Awaited<ReturnType<typeof putApiVehiclesId>>>
 export type GetApiVehiclesIdResult = NonNullable<Awaited<ReturnType<typeof getApiVehiclesId>>>
 export type GetApiVehiclesIdHistoryResult = NonNullable<Awaited<ReturnType<typeof getApiVehiclesIdHistory>>>

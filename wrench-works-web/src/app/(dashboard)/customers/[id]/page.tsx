@@ -6,18 +6,20 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { usePermission } from "@/hooks/use-permission";
 import { Button, Badge, Card, Modal, Input, Textarea, PageHeader, Spinner } from "@/components/ui";
-import { formatDate, JOB_STATUS_COLORS } from "@/lib/utils";
+import { formatDate, formatCurrency, JOB_STATUS_COLORS, statusLabel } from "@/lib/utils";
 import { ArrowLeft, Plus, Car, Phone, Mail, MapPin, Pencil } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
+import { ErrorState } from "@/components/data-state";
+import { VehicleCataloguePicker, type CatalogueSelection } from "@/components/vehicle-catalogue-picker";
 
 interface Vehicle {
   id: string;
-  make: string | null;
-  model: string | null;
+  displayName: string;
   year: number | null;
   registration: string | null;
+  colourName: string | null;
 }
 
 interface CustomerDetail {
@@ -28,7 +30,7 @@ interface CustomerDetail {
   address: string | null;
   notes: string | null;
   vehicles: Vehicle[];
-  recentJobs: { id: string; title: string; status: string; createdAtUtc: string }[];
+  recentJobs: { id: string; title: string; status: string; vehicleDisplay: string | null; total: number; createdAtUtc: string }[];
 }
 
 export default function CustomerDetailPage() {
@@ -36,11 +38,13 @@ export default function CustomerDetailPage() {
   const router = useRouter();
   const canManage = usePermission("customers.manage");
   const canManageVehicles = usePermission("vehicles.manage");
-  const { data: customer, isLoading } = useApi<CustomerDetail>(`/api/customers/${id}`);
+  const { data: customer, isLoading, error } = useApi<CustomerDetail>(`/api/customers/${id}`);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [showEditCustomer, setShowEditCustomer] = useState(false);
 
   if (isLoading) return <div className="flex justify-center py-20"><Spinner /></div>;
+  // Before the empty branch: a failed load is not a missing customer.
+  if (error) return <ErrorState error={error} onRetry={() => mutate(`/api/customers/${id}`)} />;
   if (!customer) return <p className="text-center text-surface-500 py-20">Customer not found</p>;
 
   return (
@@ -94,10 +98,10 @@ export default function CustomerDetailPage() {
                     <div className="flex items-center gap-3 p-3 rounded-lg bg-surface-50 hover:bg-surface-100 transition-colors cursor-pointer">
                       <Car size={16} className="text-surface-400" />
                       <div>
-                        <p className="text-sm font-medium text-surface-900">
-                          {[v.make, v.model].filter(Boolean).join(" ") || "Unnamed"}{v.year ? ` (${v.year})` : ""}
+                        <p className="text-sm font-medium text-surface-900">{v.displayName}</p>
+                        <p className="text-xs text-surface-500">
+                          {[v.registration, v.colourName].filter(Boolean).join(" · ")}
                         </p>
-                        {v.registration && <p className="text-xs text-surface-500">{v.registration}</p>}
                       </div>
                     </div>
                   </Link>
@@ -116,10 +120,15 @@ export default function CustomerDetailPage() {
                 {customer.recentJobs?.map((j) => (
                   <Link key={j.id} href={`/jobs/${j.id}`}>
                     <div className="flex items-center justify-between p-3 rounded-lg bg-surface-50 hover:bg-surface-100 transition-colors cursor-pointer">
-                      <p className="text-sm font-medium text-surface-900">{j.title}</p>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-surface-400">{formatDate(j.createdAtUtc)}</span>
-                        <Badge className={JOB_STATUS_COLORS[j.status]}>{j.status}</Badge>
+                      <div>
+                        <p className="text-sm font-medium text-surface-900">{j.title}</p>
+                        <p className="text-xs text-surface-500">
+                          {[j.vehicleDisplay, formatDate(j.createdAtUtc)].filter(Boolean).join(" · ")}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium">{formatCurrency(j.total)}</span>
+                        <Badge className={JOB_STATUS_COLORS[j.status]}>{statusLabel(j.status)}</Badge>
                       </div>
                     </div>
                   </Link>
@@ -150,21 +159,29 @@ export default function CustomerDetailPage() {
 }
 
 function AddVehicleModal({ customerId, onClose, onAdded }: { customerId: string; onClose: () => void; onAdded: () => void }) {
-  const [form, setForm] = useState({ make: "", model: "", year: "", registration: "", vin: "" });
+  const [selection, setSelection] = useState<Partial<CatalogueSelection>>({ colourId: null });
+  const [form, setForm] = useState({ registration: "", vin: "" });
   const [loading, setLoading] = useState(false);
 
   const update = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [field]: e.target.value }));
 
+  // The vehicle IS its catalogue entry — without a variant there is nothing to save.
+  const canSubmit = Boolean(selection.variantId && selection.year);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canSubmit) {
+      toast.error("Choose the vehicle's make, model, year and specification");
+      return;
+    }
     setLoading(true);
     try {
       await fetcher.post("/api/vehicles", {
         customerId,
-        make: form.make || null,
-        model: form.model || null,
-        year: form.year ? parseInt(form.year) : null,
+        variantId: selection.variantId,
+        year: selection.year,
+        colourId: selection.colourId ?? null,
         registration: form.registration || null,
         vin: form.vin || null,
       });
@@ -178,20 +195,18 @@ function AddVehicleModal({ customerId, onClose, onAdded }: { customerId: string;
   };
 
   return (
-    <Modal open onClose={onClose} title="Add Vehicle">
+    <Modal open onClose={onClose} title="Add Vehicle" wide>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <Input id="make" label="Make" value={form.make} onChange={update("make")} placeholder="Ford" />
-          <Input id="model" label="Model" value={form.model} onChange={update("model")} placeholder="Focus" />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <Input id="year" label="Year" type="number" value={form.year} onChange={update("year")} placeholder="2022" />
+        <VehicleCataloguePicker value={selection} onChange={setSelection} />
+
+        <div className="grid grid-cols-2 gap-4 pt-2 border-t border-surface-100">
           <Input id="registration" label="Registration" value={form.registration} onChange={update("registration")} placeholder="AB12 CDE" />
+          <Input id="vin" label="VIN" value={form.vin} onChange={update("vin")} placeholder="Optional" />
         </div>
-        <Input id="vin" label="VIN" value={form.vin} onChange={update("vin")} placeholder="Optional" />
+
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={loading}>Add Vehicle</Button>
+          <Button type="submit" loading={loading} disabled={!canSubmit}>Add Vehicle</Button>
         </div>
       </form>
     </Modal>

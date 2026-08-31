@@ -11,10 +11,12 @@ They are separate solutions/packages — always `cd` into the right one before r
 
 ### Companion docs — imported, always in context
 
-The two files below are **imported** at the end of this file, so their full contents load with it every session. You do not need to open them, and you should not re-derive what they already record. They are project memory, not reference reading:
+The four files below are **imported** at the end of this file, so their full contents load with it every session. You do not need to open them, and you should not re-derive what they already record. They are project memory, not reference reading:
 
 - **[docs/app-flow.md](docs/app-flow.md)** — how a request travels from a component to the database, the auth/session lifecycle, the permission vs. feature split, the domain model, a screen-by-screen map, and every bug found by actually running the app (fixed and open).
 - **[docs/bookings-crud.md](docs/bookings-crud.md)** — the state of booking CRUD, what's missing, verified behaviour of conflict detection and the timezone handling, and a proposed build order.
+- **[docs/vehicle-catalogue.md](docs/vehicle-catalogue.md)** — designed, not built: replacing free-text vehicle entry with a make → model → year → variant cascade, plus what NHTSA vPIC actually does and doesn't provide (measured, not assumed).
+- **[docs/review-findings.md](docs/review-findings.md)** — the triaged output of a six-reviewer pass over both projects (31 Aug 2026): what breaks today, what silently corrupts data, what is latent, each marked *Verified* or *Reported*, plus what was checked and found clean.
 
 Because they are always loaded, keeping them accurate is not optional — see "Keeping this file and the companion docs current" at the end of this file. A stale line in an imported doc is a wrong fact in every future session.
 
@@ -228,6 +230,8 @@ The job line-item endpoints load lines from those unfiltered sets and rely on a 
 
 **Known-vulnerable packages.** The build reports `NU1903` high-severity advisories for `Microsoft.OpenApi` 2.0.0-preview.11 and `Microsoft.Build.Tasks.Core` 17.7.2. Also `NU1603`: `Infrastructure` asks for EF Core `10.0.0-preview.3.25171.7`, which does not exist on the feed, so NuGet silently resolves `preview.4.25258.110` instead — the pinned versions are not the versions you get.
 
+**XML doc comments break the build on `Task`-returning helpers.** The .NET 10 preview OpenAPI XML-comment source generator emits `System.Void` for a `Task`-returning (void) method carrying a `<summary>`, failing with `CS0673: System.Void cannot be used from C#` in generated code you never wrote. Use a plain `//` comment on those; `Task<IResult>` and non-async methods are fine. Two helpers in `CalendarEndpoints`/`VehicleEndpoints` carry a note explaining why.
+
 **Environment quirks that cost time once already.** `jq` is **not installed** — use `node` for JSON in scripts and hooks (that's why `.claude/hooks/docs-reminder.mjs` is a Node script). In the Bash tool, backslashes in single-quoted strings and heredocs get mangled, so build JSON test payloads with the Write tool rather than `echo`. When driving the app in the browser, `ref_N`-based clicks resolve to wrong coordinates on this project's modals — click by screenshot coordinate instead, and note `form_input` on `datetime-local` and `<textarea>` fields silently no-ops roughly half the time, so read back and retry.
 
 **No CI, no formatter, no analyzer gate.** There's no `.github/workflows`, no `.editorconfig`, and no `dotnet format` step. Build and test discipline is manual — actually run the commands.
@@ -236,15 +240,25 @@ The job line-item endpoints load lines from those unfiltered sets and rely on a 
 
 `TenantIsolationTests` is the template for tenant-boundary tests: register two businesses through `/api/auth/register`, flip `EmailVerified` directly in the DB (login is blocked until verified, and the token otherwise only reaches `ConsoleEmailSender`), log both in, then assert across the boundary. Assert on the **stored rows** as well as the status code — a handler that returns 404 but still deleted the row would pass a status-only check.
 
-**The generated Orval client has typed requests but `void` responses.** Handlers return `Task<IResult>` with `Results.Ok(new { ... })` anonymous objects, which minimal APIs cannot infer a response type from, so the OpenAPI doc carries no response schema (`"200": { "description": "OK" }`) and Orval emits `apiClient<void>(...)` for every call. **Migrating a page to the generated client today would therefore not catch a single response-shape bug.** The prerequisite is declaring response types on the API — `.Produces<T>(200)` or `TypedResults.Ok(dto)` with named response records instead of anonymous objects. Until that lands, rules 1–3 buy consistency, not type safety.
+**Response types: the list and detail endpoints now declare them; the rest don't yet.** Minimal APIs cannot infer a schema from `Results.Ok(new { ... })`, so anonymous returns produce `"200": { "description": "OK" }` and Orval emits `apiClient<void>`. That is what let four response-shape bugs reach the browser with TypeScript happy.
 
-**`CurrentUserService.UserId` is ALWAYS null — every audit column is unwritten.** `JwtTokenService` emits a `sub` claim, but the JwtBearer handler remaps inbound standard claims by default (`MapInboundClaims` is never set to false in `Program.cs`), so `sub` arrives as `ClaimTypes.NameIdentifier` and `FindFirstValue("sub")` returns null. Custom claim names — `business_id`, `business_user_id`, `permission`, `feature` — are *not* remapped, which is why tenancy and permissions work perfectly and this went unnoticed. Two consequences, both verified: **`/api/users/me` returns 401 for everyone including Admins**, and **`Job.CreatedByUserId`, `Booking.CreatedByUserId` and `StockMovement.CreatedByUserId` are null on every row ever created** (8/8 bookings, 8/8 jobs, 4/4 movements in the dev database). Fix is one line — `options.MapInboundClaims = false` — but note it makes `UserId` start working, so check anything that silently tolerated null. Pinned by `UserAccessTests`.
+Fixed for the endpoints that caused them: paginated lists now return the named `PagedResult<T>` (`Features/Common/PagedResult.cs`) and jobs/customers/inventory list + detail carry `.Produces<T>()`. Verified — `GET /api/jobs` `$ref`s `PagedResultOfJobListItemDto`, and the client generates `apiClient<PagedResultOfJobListItemDto>` with `laborTotal`, `partsTotal` and `total` present.
 
-**Invited users can never log in.** `InviteAsync` creates the membership with `Status = Pending`; `LoginEndpoint` only loads `BusinessUsers` where `Status == Active` and returns 403 "No active business membership" otherwise. Nothing in the API or the UI transitions Pending → Active, so the invite flow is a dead end — the invite succeeds, the email sends, and the account is permanently locked out. The four existing dev users are all Active, so they did not arrive this way. Needs an accept-invite path. Pinned by `UserAccessTests`.
+The whole Catalogue slice followed on 31 Aug 2026 — all six `GET /api/catalogue/*` endpoints declare their type, so Orval generates `CatalogueMakeDto[]`, `CatalogueVariantDto[]`, `CatalogueVariantDetailDto` and so on rather than `void`. Verified by grepping the generated `api/generated/catalogue/catalogue.ts` after `npm run generate-api`.
 
-**Validation errors are invisible to users, in every form.** The middleware returns `{ code, errors: [{ field, message }] }` with no top-level `message`; `ApiError` in `lib/fetcher.ts` reads only `data.message` and falls back to "Request failed with status 400". Verified in-browser. FluentValidation's message is generated, sent, and thrown away. One fix in `ApiError` (read `errors[]`) repairs every form at once — highest value-per-line change currently known.
+**Still to do:** every write endpoint (POST/PUT/PATCH/DELETE) and the remaining slices — calendar, zones, users, billing, business — still return anonymous objects and still generate `void`. Add `.Produces<T>()` as you touch them; a named record beats an anonymous object every time.
 
-**`recentJobs` on customer detail is always empty** — the page expects the field, `CustomerDetailDto` never returns it. Needs an API change, not a rename.
+**FIXED — the `sub` claim now arrives.** `Program.cs` sets `options.MapInboundClaims = false`. Without it the JwtBearer handler remapped `sub` to `ClaimTypes.NameIdentifier`, so `CurrentUserService.UserId` was always null: `/api/users/me` returned 401 for everyone including Admins, and `Job`/`Booking`/`StockMovement.CreatedByUserId` were written null on every row ever created (8/8 bookings, 8/8 jobs, 4/4 movements in the dev database — all pre-fix rows still are). The custom claims were never remapped, which is why tenancy and permissions worked and this went unnoticed for so long. `/api/users/me` was also moved out of the `users.manage` group so a non-admin can read their own profile. Guarded by `UserAccessTests`.
+
+**CORRECTION — the invite flow is NOT a dead end.** This file previously claimed invited users could never log in. That was wrong, and the error was in the test, not the app: `VerifyEmailEndpoint` activates every `Pending` membership as part of email verification, and the invite email carries both the temporary password and the verification token. The original test set `EmailVerified` directly in the database, bypassing the endpoint that performs the activation, and so "proved" a defect that does not exist. `UserAccessTests.InvitedUser_CanLogIn_AfterVerifyingTheirEmail` now exercises the real path. **Lesson: a test that fakes a precondition can manufacture a bug report.**
+
+**FIXED — validation errors now reach the user.** `ApiError` in `lib/fetcher.ts` reads `errors[]` and joins the field messages, falling back to `message` then to the status text. The middleware returns validation failures as `{ code, errors: [{ field, message }] }` with no top-level `message`, so reading only `message` turned every failed form in the product into "Request failed with status 400". `ApiError` also now exposes `fieldErrors` and `details`, so a form can highlight individual fields and a booking 409 can name the clashing booking.
+
+**FIXED — `recentJobs` on customer detail.** `CustomerDetailDto` now carries `RecentJobs` (`IEnumerable<CustomerJobDto>`) and the query populates it. Previously the page expected the field and the DTO never returned it, so the card was permanently empty — unlike the other response-shape bugs this one needed a server change, not a rename.
+
+**[docs/review-findings.md](docs/review-findings.md) is the current defect list** — read it before starting work on either project. Six of its findings were fixed on 31 Aug 2026 (picker hydration, job zone tenancy, error states, the stock race, the backfill migration, concurrency 409s) and sit in its **Fixed** section with root causes intact; the rest are open.
+
+**A failed fetch is now distinguishable from an empty one.** Every page-level `useApi`/`useApiQuery` call site branches on `error` **before** its empty branch, rendering `<ErrorState>` from `src/components/data-state.tsx`. Put new error branches in that order — after the empty check they are dead code, which is how a failed `/api/zones` used to tell an admin "No zones configured".
 
 **`npm run lint` is not configured** — it drops into an interactive ESLint setup prompt. There is no working lint gate; `npm run build` (which type-checks) is the real one.
 
@@ -264,7 +278,7 @@ The job line-item endpoints load lines from those unfiltered sets and rely on a 
 
 ## Keeping this file and the companion docs current
 
-**These three files are the project's memory.** `CLAUDE.md`, `docs/app-flow.md` and `docs/bookings-crud.md` record things the source cannot tell you: behaviour verified by running the app, decisions and their reasons, traps that cost someone an hour, and questions still open. A stale entry here is worse than no entry — it produces confident, wrong work.
+**These five files are the project's memory.** `CLAUDE.md`, `docs/app-flow.md`, `docs/bookings-crud.md`, `docs/vehicle-catalogue.md` and `docs/review-findings.md` record things the source cannot tell you: behaviour verified by running the app, decisions and their reasons, traps that cost someone an hour, and questions still open. A stale entry here is worse than no entry — it produces confident, wrong work.
 
 Updating them is part of finishing a task, not an optional extra. Do it in the same turn as the change.
 
@@ -289,6 +303,8 @@ Delete an entry only when it was *wrong*, and then say so plainly rather than er
 | Migrate a page to the generated client, or off `useApiQuery` | `CLAUDE.md` rules 3–4 "Current state" callouts, and `app-flow.md`'s screen table |
 | Add a response type (`.Produces<T>` / `TypedResults`) | The Orval `void`-responses entry — that's the blocker being lifted |
 | Learn a command, gotcha or environment fact the hard way | `CLAUDE.md` — Commands or Known gaps |
+| Fix, or disprove, one of the review findings | `review-findings.md` — move it to **Fixed** with its root cause, or mark it *Disproved* and say why |
+| Run another review pass | `review-findings.md` — merge into the existing sections; do not start a second file |
 
 ### Standard of evidence
 
@@ -298,7 +314,9 @@ State how you know. "Verified by running X", "confirmed in the browser", "from r
 
 ## Imported project memory
 
-The two files below are loaded in full with this one. Treat their contents as part of these instructions.
+The files below are loaded in full with this one. Treat their contents as part of these instructions.
 
 @docs/app-flow.md
 @docs/bookings-crud.md
+@docs/vehicle-catalogue.md
+@docs/review-findings.md

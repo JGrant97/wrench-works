@@ -414,8 +414,11 @@ namespace WrenchWorks.Infrastructure.Migrations
                         .HasPrecision(10, 2)
                         .HasColumnType("numeric(10,2)");
 
-                    b.Property<long>("RowVersion")
-                        .HasColumnType("bigint");
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
 
                     b.Property<string>("Sku")
                         .HasMaxLength(100)
@@ -914,11 +917,18 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Property<Guid>("BusinessId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ColourId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
 
                     b.Property<string>("EngineType")
                         .HasColumnType("text");
@@ -945,6 +955,9 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("VariantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Vin")
                         .HasMaxLength(17)
                         .HasColumnType("character varying(17)");
@@ -954,11 +967,191 @@ namespace WrenchWorks.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ColourId");
+
                     b.HasIndex("CustomerId");
+
+                    b.HasIndex("VariantId");
 
                     b.HasIndex("BusinessId", "Registration");
 
                     b.ToTable("Vehicles");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.VehicleColour", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("HexCode")
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("VehicleColours");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.VehicleMake", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("VpicMakeId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.HasIndex("VpicMakeId");
+
+                    b.ToTable("VehicleMakes");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.VehicleModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("MakeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("VpicModelId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MakeId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("VehicleModels");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.VehicleVariant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BodyStyle")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DriveType")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<int?>("EngineCylinders")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal?>("EngineDisplacementL")
+                        .HasPrecision(3, 1)
+                        .HasColumnType("numeric(3,1)");
+
+                    b.Property<string>("FuelType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Market")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Transmission")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Trim")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("YearFrom")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("YearTo")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ModelId", "YearFrom", "YearTo");
+
+                    b.ToTable("VehicleVariants");
                 });
 
             modelBuilder.Entity("WrenchWorks.Domain.Entities.Zone", b =>
@@ -1313,15 +1506,51 @@ namespace WrenchWorks.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("WrenchWorks.Domain.Entities.VehicleColour", "Colour")
+                        .WithMany()
+                        .HasForeignKey("ColourId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("WrenchWorks.Domain.Entities.Customer", "Customer")
                         .WithMany("Vehicles")
                         .HasForeignKey("CustomerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("WrenchWorks.Domain.Entities.VehicleVariant", "Variant")
+                        .WithMany()
+                        .HasForeignKey("VariantId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Business");
 
+                    b.Navigation("Colour");
+
                     b.Navigation("Customer");
+
+                    b.Navigation("Variant");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.VehicleModel", b =>
+                {
+                    b.HasOne("WrenchWorks.Domain.Entities.VehicleMake", "Make")
+                        .WithMany("Models")
+                        .HasForeignKey("MakeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Make");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.VehicleVariant", b =>
+                {
+                    b.HasOne("WrenchWorks.Domain.Entities.VehicleModel", "Model")
+                        .WithMany("Variants")
+                        .HasForeignKey("ModelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Model");
                 });
 
             modelBuilder.Entity("WrenchWorks.Domain.Entities.Zone", b =>
@@ -1409,6 +1638,16 @@ namespace WrenchWorks.Infrastructure.Migrations
             modelBuilder.Entity("WrenchWorks.Domain.Entities.Vehicle", b =>
                 {
                     b.Navigation("Jobs");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.VehicleMake", b =>
+                {
+                    b.Navigation("Models");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.VehicleModel", b =>
+                {
+                    b.Navigation("Variants");
                 });
 
             modelBuilder.Entity("WrenchWorks.Domain.Entities.Zone", b =>

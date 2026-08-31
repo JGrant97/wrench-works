@@ -29,7 +29,13 @@ public static class UserEndpoints
 
         group.MapGet("/", ListAsync);
         group.MapPost("/invite", InviteAsync);
-        group.MapGet("/me", GetMeAsync).RequireAuthorization();
+
+        // "/me" is deliberately OUTSIDE the group above. Group metadata is additive, so
+        // declaring it inside meant reading your own profile also required users.manage —
+        // i.e. only admins could see who they were. Any authenticated user may read theirs.
+        app.MapGet("/api/users/me", GetMeAsync)
+           .WithTags("Users")
+           .RequireAuthorization();
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, CancellationToken ct)

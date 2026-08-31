@@ -5,11 +5,12 @@ import { useParams, useRouter } from "next/navigation";
 import { useApi, useMutation } from "@/hooks/use-api";
 import { usePermission } from "@/hooks/use-permission";
 import { Button, Badge, Card, Modal, Input, Textarea, Select, PageHeader, Spinner } from "@/components/ui";
-import { formatCurrency, formatDate, formatDateTime, JOB_STATUS_COLORS } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime, JOB_STATUS_COLORS, statusLabel } from "@/lib/utils";
 import { ArrowLeft, Plus, Trash2, ArrowRightCircle, Pencil } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
+import { ErrorState } from "@/components/data-state";
 import Link from "next/link";
 
 interface LaborLine {
@@ -79,7 +80,7 @@ export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const canEdit = usePermission("jobs.edit");
-  const { data: job, isLoading } = useApi<JobDetail>(`/api/jobs/${id}`);
+  const { data: job, isLoading, error } = useApi<JobDetail>(`/api/jobs/${id}`);
   const [showAddLabor, setShowAddLabor] = useState(false);
   const [showAddPart, setShowAddPart] = useState(false);
   const [showEditJob, setShowEditJob] = useState(false);
@@ -120,6 +121,8 @@ export default function JobDetailPage() {
   };
 
   if (isLoading) return <div className="flex justify-center py-20"><Spinner /></div>;
+  // Before the empty branch: a failed load is not a missing job.
+  if (error) return <ErrorState error={error} onRetry={refreshJob} />;
   if (!job) return <p className="text-center text-surface-500 py-20">Job not found</p>;
 
   const transitions = STATUS_TRANSITIONS[job.status] ?? [];
@@ -134,7 +137,7 @@ export default function JobDetailPage() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-surface-900 font-display">{job.title}</h1>
-            <Badge className={JOB_STATUS_COLORS[job.status]}>{job.status}</Badge>
+            <Badge className={JOB_STATUS_COLORS[job.status]}>{statusLabel(job.status)}</Badge>
           </div>
           <p className="text-sm text-surface-500 mt-1">
             <Link href={`/customers/${job.customerId}`} className="hover:text-brand-600">{job.customerName}</Link>

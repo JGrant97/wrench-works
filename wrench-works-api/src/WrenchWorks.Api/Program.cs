@@ -13,6 +13,7 @@ using WrenchWorks.Api.Features.Auth.VerifyEmail;
 using WrenchWorks.Api.Features.Billing;
 using WrenchWorks.Api.Features.Business;
 using WrenchWorks.Api.Features.Calendar;
+using WrenchWorks.Api.Features.Catalogue;
 using WrenchWorks.Api.Features.Customers;
 using WrenchWorks.Api.Features.Inventory;
 using WrenchWorks.Api.Features.Jobs;
@@ -42,6 +43,14 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        // Keep JWT claim names exactly as issued. By default the handler remaps standard
+        // claims — "sub" would arrive as ClaimTypes.NameIdentifier, so CurrentUserService's
+        // FindFirstValue("sub") returned null for every request. That silently broke
+        // /api/users/me (401 for everyone) and left every CreatedByUserId audit column
+        // unwritten. The custom claims (business_id, permission, feature) were never
+        // remapped, which is why tenancy and authorization worked and this went unnoticed.
+        options.MapInboundClaims = false;
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -126,6 +135,7 @@ BusinessEndpoints.Map(app);
 UserEndpoints.Map(app);
 ZoneEndpoints.Map(app);
 CustomerEndpoints.Map(app);
+CatalogueEndpoints.Map(app);
 VehicleEndpoints.Map(app);
 CalendarEndpoints.Map(app);
 JobEndpoints.Map(app);
@@ -144,6 +154,7 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.MigrateAsync();
     await PermissionSeeder.SeedPermissionsAsync(db);
+    await VehicleCatalogueSeeder.SeedAsync(db);
 }
 
 app.Run();

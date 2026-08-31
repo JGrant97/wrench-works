@@ -26,6 +26,39 @@ export function formatDateTime(date: string | Date) {
   return `${formatDate(date)} ${formatTime(date)}`;
 }
 
+/**
+ * Display labels for the raw status enums the API returns.
+ *
+ * Badges used to render the enum verbatim ("InProgress", "WaitingParts") while the
+ * filter dropdown beside them showed "In Progress" — the same status spelled two ways
+ * on one screen. Use `statusLabel()` anywhere a status is shown to a user.
+ */
+export const JOB_STATUS_LABELS: Record<string, string> = {
+  Draft: "Draft",
+  Scheduled: "Scheduled",
+  InProgress: "In Progress",
+  WaitingParts: "Waiting Parts",
+  Completed: "Completed",
+  Invoiced: "Invoiced",
+  Closed: "Closed",
+};
+
+export const BOOKING_STATUS_LABELS: Record<string, string> = {
+  Confirmed: "Confirmed",
+  Cancelled: "Cancelled",
+  Completed: "Completed",
+  NoShow: "No Show",
+};
+
+/** Falls back to splitting CamelCase, so a new enum value degrades readably. */
+export function statusLabel(status: string): string {
+  return (
+    JOB_STATUS_LABELS[status] ??
+    BOOKING_STATUS_LABELS[status] ??
+    status.replace(/([a-z])([A-Z])/g, "$1 $2")
+  );
+}
+
 export const JOB_STATUS_COLORS: Record<string, string> = {
   Draft: "bg-surface-200 text-surface-700",
   Scheduled: "bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300",

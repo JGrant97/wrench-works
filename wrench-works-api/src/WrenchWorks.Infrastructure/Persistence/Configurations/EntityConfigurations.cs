@@ -115,9 +115,71 @@ public class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
         builder.HasKey(e => e.Id);
         builder.Property(e => e.Registration).HasMaxLength(20);
         builder.Property(e => e.Vin).HasMaxLength(17);
+        builder.Property(e => e.DisplayName).HasMaxLength(300);
         builder.HasIndex(e => new { e.BusinessId, e.Registration });
         builder.HasOne(e => e.Customer).WithMany(c => c.Vehicles).HasForeignKey(e => e.CustomerId);
         builder.HasOne(e => e.Business).WithMany().HasForeignKey(e => e.BusinessId);
+
+        // Catalogue links. Restrict: a variant that vehicles reference must not be deletable.
+        builder.HasOne(e => e.Variant).WithMany().HasForeignKey(e => e.VariantId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(e => e.Colour).WithMany().HasForeignKey(e => e.ColourId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+// ── Vehicle catalogue: global reference data, no BusinessId, no query filter ──
+
+public class VehicleMakeConfiguration : IEntityTypeConfiguration<VehicleMake>
+{
+    public void Configure(EntityTypeBuilder<VehicleMake> builder)
+    {
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Name).IsRequired().HasMaxLength(100);
+        builder.HasIndex(e => e.Name).IsUnique();
+        builder.HasIndex(e => e.VpicMakeId);
+    }
+}
+
+public class VehicleModelConfiguration : IEntityTypeConfiguration<VehicleModel>
+{
+    public void Configure(EntityTypeBuilder<VehicleModel> builder)
+    {
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Name).IsRequired().HasMaxLength(150);
+        // One model name per make — this is what makes the importer safely idempotent.
+        builder.HasIndex(e => new { e.MakeId, e.Name }).IsUnique();
+        builder.HasOne(e => e.Make).WithMany(m => m.Models).HasForeignKey(e => e.MakeId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class VehicleVariantConfiguration : IEntityTypeConfiguration<VehicleVariant>
+{
+    public void Configure(EntityTypeBuilder<VehicleVariant> builder)
+    {
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Trim).HasMaxLength(100);
+        builder.Property(e => e.BodyStyle).HasMaxLength(60);
+        builder.Property(e => e.EngineDisplacementL).HasPrecision(3, 1);
+        builder.Property(e => e.FuelType).HasConversion<string>().HasMaxLength(20);
+        builder.Property(e => e.Transmission).HasConversion<string>().HasMaxLength(20);
+        builder.Property(e => e.DriveType).HasConversion<string>().HasMaxLength(10);
+        builder.Property(e => e.Market).HasConversion<string>().HasMaxLength(10);
+        builder.HasIndex(e => new { e.ModelId, e.YearFrom, e.YearTo });
+        builder.HasOne(e => e.Model).WithMany(m => m.Variants).HasForeignKey(e => e.ModelId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class VehicleColourConfiguration : IEntityTypeConfiguration<VehicleColour>
+{
+    public void Configure(EntityTypeBuilder<VehicleColour> builder)
+    {
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Name).IsRequired().HasMaxLength(60);
+        builder.Property(e => e.HexCode).HasMaxLength(7);
+        builder.HasIndex(e => e.Name).IsUnique();
     }
 }
 
@@ -208,6 +270,16 @@ public class InventoryItemConfiguration : IEntityTypeConfiguration<InventoryItem
         builder.HasIndex(e => new { e.BusinessId, e.Sku }).IsUnique().HasFilter("\"Sku\" IS NOT NULL");
         builder.HasOne(e => e.Category).WithMany(c => c.Items).HasForeignKey(e => e.CategoryId).IsRequired(false);
         builder.HasOne(e => e.Business).WithMany(b => b.InventoryItems).HasForeignKey(e => e.BusinessId);
+
+        // StockOnHand is read, checked, then written by both AddPartAsync and
+        // AdjustStockAsync. Without a concurrency token two simultaneous part-adds read the
+        // same value, both pass the "enough stock?" guard, and the second write silently
+        // overwrites the first — stock drifts from the StockMovement trail that exists to
+        // reconstruct it, and can go negative. InventoryItem inherits RowVersion from
+        // BaseEntity like the five entities that already map it, but was the one left
+        // unmapped, so the column was never incremented and never checked.
+        // See docs/review-findings.md finding 6.
+        builder.Property(e => e.RowVersion).IsRowVersion();
     }
 }
 

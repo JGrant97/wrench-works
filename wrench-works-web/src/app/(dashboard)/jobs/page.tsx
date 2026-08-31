@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useApiQuery } from "@/hooks/use-api";
 import { usePermission } from "@/hooks/use-permission";
 import { Button, Badge, Card, PageHeader, Spinner, EmptyState, Input, Select } from "@/components/ui";
-import { cn, formatDate, JOB_STATUS_COLORS, formatCurrency } from "@/lib/utils";
+import { ErrorState } from "@/components/data-state";
+import { cn, formatDate, JOB_STATUS_COLORS, formatCurrency , statusLabel} from "@/lib/utils";
 import { Plus, Briefcase, Search } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
@@ -49,7 +50,7 @@ export default function JobsPage() {
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useApiQuery<JobListResponse>("/api/jobs", {
+  const { data, isLoading, error, mutate: reload } = useApiQuery<JobListResponse>("/api/jobs", {
     search: search || undefined,
     status: status || undefined,
     page: String(page),
@@ -96,6 +97,8 @@ export default function JobsPage() {
 
       {isLoading ? (
         <div className="flex justify-center py-20"><Spinner /></div>
+      ) : error ? (
+        <ErrorState error={error} onRetry={() => reload()} />
       ) : jobs.length === 0 ? (
         <EmptyState
           icon={<Briefcase size={48} />}

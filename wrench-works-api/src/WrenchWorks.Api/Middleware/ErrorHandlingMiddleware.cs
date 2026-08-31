@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentValidation;
+using Microsoft.EntityFrameworkCore;
 
 namespace WrenchWorks.Api.Middleware;
 
@@ -42,6 +43,19 @@ public class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorHandling
         {
             context.Response.StatusCode = 401;
             await context.Response.WriteAsJsonAsync(new { code = "unauthorized", message = "Authentication required" });
+        }
+        // Optimistic concurrency is configured on six tables, but until this catch existed
+        // it was invisible when it fired: a lost update surfaced as a generic 500 with no
+        // hint that retrying would work. 409 is the honest status — the caller's copy is
+        // stale, and reloading resolves it.
+        catch (DbUpdateConcurrencyException)
+        {
+            context.Response.StatusCode = 409;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                code = "concurrency_conflict",
+                message = "Someone else changed this while you were working on it. Reload and try again."
+            });
         }
         catch (Exception ex)
         {

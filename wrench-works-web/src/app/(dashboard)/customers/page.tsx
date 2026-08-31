@@ -10,6 +10,7 @@ import { Plus, Users, Search, Phone, Mail } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
+import { ErrorState } from "@/components/data-state";
 
 interface Customer {
   id: string;
@@ -33,7 +34,7 @@ export default function CustomersPage() {
   const [page, setPage] = useState(1);
   const [showCreate, setShowCreate] = useState(false);
 
-  const { data, isLoading } = useApiQuery<CustomerListResponse>("/api/customers", {
+  const { data, isLoading, error, mutate: reload } = useApiQuery<CustomerListResponse>("/api/customers", {
     search: search || undefined,
     page: String(page),
     pageSize: "25",
@@ -71,6 +72,8 @@ export default function CustomersPage() {
 
       {isLoading ? (
         <div className="flex justify-center py-20"><Spinner /></div>
+      ) : error ? (
+        <ErrorState error={error} onRetry={() => reload()} />
       ) : customers.length === 0 ? (
         <EmptyState
           icon={<Users size={48} />}

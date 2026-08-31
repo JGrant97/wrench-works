@@ -9,6 +9,7 @@ import { Plus, Package, Search, AlertTriangle, Pencil } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
+import { ErrorState } from "@/components/data-state";
 import { FeatureGate } from "@/components/feature-gate";
 
 interface InventoryItem {
@@ -29,7 +30,7 @@ export default function InventoryPage() {
   const [adjustItem, setAdjustItem] = useState<InventoryItem | null>(null);
 
   const { data: categories } = useApi<Category[]>("/api/inventory/categories");
-  const { data, isLoading } = useApiQuery<ListResponse>("/api/inventory/items", {
+  const { data, isLoading, error } = useApiQuery<ListResponse>("/api/inventory/items", {
     search: search || undefined, categoryId: categoryId || undefined,
     lowStockOnly: lowStockOnly ? "true" : undefined, page: String(page), pageSize: "25",
   });
@@ -61,6 +62,7 @@ export default function InventoryPage() {
       </Card>
 
       {isLoading ? <div className="flex justify-center py-20"><Spinner /></div>
+      : error ? <ErrorState error={error} onRetry={refresh} />
       : items.length === 0 ? <EmptyState icon={<Package size={48} />} title="No items found" description={search || categoryId ? "Try different filters" : "Add inventory items to track stock"} />
       : (
         <>
@@ -199,9 +201,17 @@ function EditItemModal({ item, categories, onClose, onSaved }: { item: Inventory
 function AdjustStockModal({ item, onClose, onAdjusted }: { item: InventoryItem; onClose: () => void; onAdjusted: () => void }) {
   const [form, setForm] = useState({ quantityDelta: "", reason: "ManualAdjustment", notes: "" });
   const [loading, setLoading] = useState(false);
+  // Values MUST match the StockMovementReason enum exactly — Enum.TryParse rejects
+  // anything else with a 400. "Restock" and "Returned" used to be offered here and
+  // always failed; the real values are PurchaseReceived and JobReturn.
+  // JobConsumption is omitted deliberately: it is written by the job part flow, not by hand.
   const reasons = [
-    { value: "ManualAdjustment", label: "Manual Adjustment" }, { value: "Restock", label: "Restock" },
-    { value: "Damaged", label: "Damaged" }, { value: "Returned", label: "Returned" },
+    { value: "ManualAdjustment", label: "Manual adjustment" },
+    { value: "PurchaseReceived", label: "Purchase received (restock)" },
+    { value: "JobReturn", label: "Returned from job" },
+    { value: "Damaged", label: "Damaged" },
+    { value: "Correction", label: "Stock-take correction" },
+    { value: "Other", label: "Other" },
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {

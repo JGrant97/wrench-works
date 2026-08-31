@@ -8,6 +8,7 @@ import { Plus, UserPlus } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
+import { ErrorState } from "@/components/data-state";
 
 interface BusinessUserDto {
   id: string;
@@ -24,7 +25,7 @@ interface RoleDto {
 }
 
 export default function SettingsUsersPage() {
-  const { data: users, isLoading } = useApi<BusinessUserDto[]>("/api/users");
+  const { data: users, isLoading, error } = useApi<BusinessUserDto[]>("/api/users");
   const [showInvite, setShowInvite] = useState(false);
 
   return (
@@ -40,6 +41,8 @@ export default function SettingsUsersPage() {
             </div>
             {isLoading ? (
               <Spinner />
+            ) : error ? (
+              <ErrorState error={error} onRetry={() => mutate("/api/users")} compact />
             ) : !users || users.length === 0 ? (
               <p className="text-sm text-surface-400">No team members</p>
             ) : (

@@ -8,6 +8,7 @@ import { Plus, Pencil } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
+import { ErrorState } from "@/components/data-state";
 
 interface Zone {
   id: string;
@@ -18,7 +19,7 @@ interface Zone {
 }
 
 export default function SettingsZonesPage() {
-  const { data: zones, isLoading } = useApi<Zone[]>("/api/zones");
+  const { data: zones, isLoading, error } = useApi<Zone[]>("/api/zones");
   const [editZone, setEditZone] = useState<Zone | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
@@ -37,6 +38,8 @@ export default function SettingsZonesPage() {
             </div>
             {isLoading ? (
               <Spinner />
+            ) : error ? (
+              <ErrorState error={error} onRetry={refresh} compact />
             ) : !zones || zones.length === 0 ? (
               <p className="text-sm text-surface-400">No zones configured yet</p>
             ) : (

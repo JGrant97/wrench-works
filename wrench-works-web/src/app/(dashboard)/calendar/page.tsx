@@ -7,7 +7,7 @@ import {
   Button, Badge, Modal, Input, Select, Textarea,
   PageHeader, Spinner, EmptyState,
 } from "@/components/ui";
-import { cn, formatTime, BOOKING_STATUS_COLORS } from "@/lib/utils";
+import { cn, formatTime, BOOKING_STATUS_COLORS , statusLabel} from "@/lib/utils";
 import { Plus, Calendar as CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   format, startOfWeek, endOfWeek, addWeeks, subWeeks, addDays,
@@ -17,11 +17,41 @@ import {
   getDay,
 } from "date-fns";
 import toast from "react-hot-toast";
+import { ApiError } from "@/lib/fetcher";
 import { mutate } from "swr";
+import { ErrorState } from "@/components/data-state";
 
 /* ══════════════════════════════════════════════════
    Types
    ══════════════════════════════════════════════════ */
+/**
+ * Turns a booking API error into something a service advisor can act on.
+ *
+ * A 409 carries `details.conflictingBookingIds`, which the UI used to discard — the
+ * user saw "Booking conflicts detected" with no idea what they had clashed with, which
+ * is the one thing they need in order to resolve it. If the clashing booking is on
+ * screen we can name it and give its times.
+ */
+function describeBookingError(err: unknown, bookings: Booking[] | undefined): string {
+  if (!(err instanceof ApiError)) {
+    return err instanceof Error ? err.message : "Failed to save booking";
+  }
+
+  const ids = (err.details as { conflictingBookingIds?: string[] } | undefined)?.conflictingBookingIds;
+  if (!ids?.length) return err.message;
+
+  const clashes = (bookings ?? []).filter((b) => ids.includes(b.id));
+  if (clashes.length === 0) {
+    return `That slot is already taken by ${ids.length} other booking${ids.length === 1 ? "" : "s"} in this bay.`;
+  }
+
+  const described = clashes
+    .map((b) => `${b.title} (${formatTime(b.startUtc)}–${formatTime(b.endUtc)})`)
+    .join(", ");
+
+  return `Clashes with ${described} in ${clashes[0].zoneName}.`;
+}
+
 interface Booking {
   id: string;
   zoneId: string;
@@ -136,6 +166,7 @@ export default function CalendarPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedZone, setSelectedZone] = useState("all");
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
 
   // Compute query range
   const queryFrom = view === "week"
@@ -145,11 +176,11 @@ export default function CalendarPage() {
     ? endOfWeek(weekStart, { weekStartsOn: 1 })
     : endOfWeek(endOfMonth(monthDate), { weekStartsOn: 1 });
 
-  const { data: bookings, isLoading } = useApiQuery<Booking[]>(
+  const { data: bookings, isLoading, error: bookingsError, mutate: reloadBookings } = useApiQuery<Booking[]>(
     "/api/calendar/bookings",
     { from: queryFrom.toISOString(), to: queryTo.toISOString() }
   );
-  const { data: zones } = useApiQuery<Zone[]>("/api/zones");
+  const { data: zones, error: zonesError, mutate: reloadZones } = useApiQuery<Zone[]>("/api/zones");
 
   const activeZones = (zones ?? []).filter((z) => z.isActive);
 
@@ -232,6 +263,11 @@ export default function CalendarPage() {
 
       {isLoading ? (
         <div className="flex justify-center py-20"><Spinner /></div>
+      ) : bookingsError || zonesError ? (
+        <ErrorState
+          error={bookingsError ?? zonesError}
+          onRetry={() => { reloadBookings(); reloadZones(); }}
+        />
       ) : activeZones.length === 0 ? (
         <EmptyState
           icon={<CalendarIcon size={48} />}
@@ -256,11 +292,29 @@ export default function CalendarPage() {
       )}
 
       {selectedBooking && (
-        <BookingDetailModal booking={selectedBooking} zones={activeZones} onClose={() => setSelectedBooking(null)} />
+        <BookingDetailModal
+          booking={selectedBooking}
+          zones={activeZones}
+          onClose={() => setSelectedBooking(null)}
+          onEdit={() => { setEditingBooking(selectedBooking); setSelectedBooking(null); }}
+        />
+      )}
+      {editingBooking && (
+        <EditBookingModal
+          booking={editingBooking}
+          zones={activeZones}
+          bookings={bookings}
+          onClose={() => setEditingBooking(null)}
+          onSaved={() => {
+            setEditingBooking(null);
+            mutate((key: string) => typeof key === "string" && key.startsWith("/api/calendar"));
+          }}
+        />
       )}
       {showCreate && (
         <CreateBookingModal
           zones={activeZones}
+          bookings={bookings}
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);
@@ -599,10 +653,29 @@ function MonthView({
 /* ══════════════════════════════════════════════════
    Booking Detail Modal
    ══════════════════════════════════════════════════ */
-function BookingDetailModal({ booking, zones, onClose }: { booking: Booking; zones: Zone[]; onClose: () => void }) {
+function BookingDetailModal({
+  booking, zones, onClose, onEdit,
+}: { booking: Booking; zones: Zone[]; onClose: () => void; onEdit: () => void }) {
   const zone = zones.find((z) => z.id === booking.zoneId);
   const canEdit = usePermission("calendar.edit");
   const [deleting, setDeleting] = useState(false);
+  const [status, setStatusPending] = useState<string | null>(null);
+
+  /** Completed / NoShow were unreachable before PATCH /bookings/{id}/status existed. */
+  const setStatus = async (next: string) => {
+    setStatusPending(next);
+    try {
+      const { fetcher } = await import("@/lib/fetcher");
+      await fetcher.patch(`/api/calendar/bookings/${booking.id}/status`, { status: next });
+      toast.success(next === "NoShow" ? "Marked as no-show" : "Marked completed");
+      mutate((key: string) => typeof key === "string" && key.startsWith("/api/calendar"));
+      onClose();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to update status");
+    } finally {
+      setStatusPending(null);
+    }
+  };
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -672,7 +745,18 @@ function BookingDetailModal({ booking, zones, onClose }: { booking: Booking; zon
         )}
 
         {canEdit && booking.status === "Confirmed" && (
-          <div className="flex justify-end pt-2 border-t border-surface-200">
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-surface-200">
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={onEdit}>
+                Edit
+              </Button>
+              <Button variant="ghost" size="sm" loading={status === "Completed"} onClick={() => setStatus("Completed")}>
+                Mark completed
+              </Button>
+              <Button variant="ghost" size="sm" loading={status === "NoShow"} onClick={() => setStatus("NoShow")}>
+                No-show
+              </Button>
+            </div>
             <Button variant="danger" size="sm" loading={deleting} onClick={handleDelete}>
               Cancel Booking
             </Button>
@@ -686,7 +770,7 @@ function BookingDetailModal({ booking, zones, onClose }: { booking: Booking; zon
 /* ══════════════════════════════════════════════════
    Create Booking Modal
    ══════════════════════════════════════════════════ */
-function CreateBookingModal({ zones, onClose, onCreated }: { zones: Zone[]; onClose: () => void; onCreated: () => void }) {
+function CreateBookingModal({ zones, bookings, onClose, onCreated }: { zones: Zone[]; bookings: Booking[] | undefined; onClose: () => void; onCreated: () => void }) {
   const [form, setForm] = useState({
     zoneId: zones[0]?.id ?? "",
     customerId: "",
@@ -705,7 +789,7 @@ function CreateBookingModal({ zones, onClose, onCreated }: { zones: Zone[]; onCl
     { q: customerSearch }
   );
 
-  const { data: customerDetail } = useApiQuery<{ vehicles: { id: string; make?: string; model?: string; registration?: string }[] }>(
+  const { data: customerDetail } = useApiQuery<{ vehicles: { id: string; displayName: string; registration?: string }[] }>(
     form.customerId ? `/api/customers/${form.customerId}` : null
   );
   const vehicles = customerDetail?.vehicles ?? [];
@@ -732,7 +816,7 @@ function CreateBookingModal({ zones, onClose, onCreated }: { zones: Zone[]; onCl
       toast.success("Booking created");
       onCreated();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to create booking");
+      toast.error(describeBookingError(err, bookings));
     } finally {
       setLoading(false);
     }
@@ -785,7 +869,7 @@ function CreateBookingModal({ zones, onClose, onCreated }: { zones: Zone[]; onCl
             placeholder="Select vehicle"
             options={vehicles.map((v) => ({
               value: v.id,
-              label: `${v.make ?? ""} ${v.model ?? ""} ${v.registration ?? ""}`.trim() || "Unnamed",
+              label: [v.displayName, v.registration].filter(Boolean).join(" · "),
             }))}
           />
         )}
@@ -816,6 +900,101 @@ function CreateBookingModal({ zones, onClose, onCreated }: { zones: Zone[]; onCl
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={loading} disabled={!canSubmit}>Create Booking</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/* ══════════════════════════════════════════════════
+   Edit Booking
+   ══════════════════════════════════════════════════ */
+/**
+ * Edit an existing booking.
+ *
+ * Before this existed a booking was immutable: changing a time meant cancel-and-
+ * recreate, and cancelling closes the linked job. Customer and vehicle are shown but
+ * not editable here — moving a booking to a different car is closer to a new booking
+ * than an edit, and doing it silently would strand the linked job's history.
+ */
+function EditBookingModal({
+  booking, zones, bookings, onClose, onSaved,
+}: {
+  booking: Booking;
+  zones: Zone[];
+  bookings: Booking[] | undefined;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  /** datetime-local wants "yyyy-MM-ddTHH:mm" in LOCAL time, not an ISO UTC string. */
+  const toLocalInput = (iso: string) => format(new Date(iso), "yyyy-MM-dd'T'HH:mm");
+
+  const [form, setForm] = useState({
+    zoneId: booking.zoneId,
+    title: booking.title,
+    startUtc: toLocalInput(booking.startUtc),
+    endUtc: toLocalInput(booking.endUtc),
+    notes: booking.notes ?? "",
+  });
+  const [loading, setLoading] = useState(false);
+
+  const update = (field: string) => (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+  ) => setForm((f) => ({ ...f, [field]: e.target.value }));
+
+  const canSubmit = Boolean(form.zoneId && form.title.trim() && form.startUtc && form.endUtc);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    setLoading(true);
+    try {
+      const { fetcher } = await import("@/lib/fetcher");
+      await fetcher.put(`/api/calendar/bookings/${booking.id}`, {
+        zoneId: form.zoneId,
+        customerId: booking.customerId,
+        vehicleId: booking.vehicleId,
+        title: form.title.trim(),
+        startUtc: new Date(form.startUtc).toISOString(),
+        endUtc: new Date(form.endUtc).toISOString(),
+        notes: form.notes || null,
+      });
+      toast.success("Booking updated");
+      onSaved();
+    } catch (err: unknown) {
+      toast.error(describeBookingError(err, bookings));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Edit Booking" wide>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="text-sm text-surface-500">
+          {booking.customerName} · {booking.vehicleDisplay}
+        </div>
+
+        <Select
+          id="zoneId"
+          label="Zone / Bay"
+          value={form.zoneId}
+          onChange={update("zoneId")}
+          options={zones.map((z) => ({ value: z.id, label: z.name }))}
+        />
+
+        <Input id="title" label="Title" value={form.title} onChange={update("title")} required />
+
+        <div className="grid grid-cols-2 gap-4">
+          <Input id="startUtc" label="Start" type="datetime-local" value={form.startUtc} onChange={update("startUtc")} required />
+          <Input id="endUtc" label="End" type="datetime-local" value={form.endUtc} onChange={update("endUtc")} required />
+        </div>
+
+        <Textarea id="notes" label="Notes" value={form.notes} onChange={update("notes")} />
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={loading} disabled={!canSubmit}>Save Changes</Button>
         </div>
       </form>
     </Modal>

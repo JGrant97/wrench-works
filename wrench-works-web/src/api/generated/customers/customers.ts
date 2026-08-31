@@ -7,8 +7,10 @@
  */
 import type {
   CreateCustomerRequest,
+  CustomerDetailDto,
   GetApiCustomersParams,
   GetApiCustomersSearchParams,
+  PagedResultOfCustomerDto,
   UpdateCustomerRequest
 } from '.././models';
 
@@ -19,7 +21,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiCustomers = (
     params?: GetApiCustomersParams,
  ) => {
-      return apiClient<void>(
+      return apiClient<PagedResultOfCustomerDto>(
       {url: `/api/customers`, method: 'GET',
         params
     },
@@ -38,7 +40,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiCustomersId = (
     id: string,
  ) => {
-      return apiClient<void>(
+      return apiClient<CustomerDetailDto>(
       {url: `/api/customers/${id}`, method: 'GET'
     },
       );

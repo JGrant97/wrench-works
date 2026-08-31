@@ -28,7 +28,7 @@ export default function NewJobPage() {
   );
 
   // Fetch vehicles for selected customer via the customer detail endpoint
-  const { data: customerDetail } = useApiQuery<{ vehicles: { id: string; make?: string; model?: string; registration?: string }[] }>(
+  const { data: customerDetail } = useApiQuery<{ vehicles: { id: string; displayName: string; registration?: string }[] }>(
     form.customerId ? `/api/customers/${form.customerId}` : null
   );
 
@@ -112,7 +112,7 @@ export default function NewJobPage() {
               placeholder="Select vehicle"
               options={vehicles.map((v) => ({
                 value: v.id,
-                label: `${v.make ?? ""} ${v.model ?? ""} ${v.registration ?? ""}`.trim() || "Unnamed",
+                label: [v.displayName, v.registration].filter(Boolean).join(" · "),
               }))}
             />
           )}

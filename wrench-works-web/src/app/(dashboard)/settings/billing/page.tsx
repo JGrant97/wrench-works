@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { Button, Badge, Card, PageHeader, Spinner } from "@/components/ui";
+import { ErrorState } from "@/components/data-state";
 import { SettingsNav } from "@/components/settings-nav";
 import { formatDate, cn } from "@/lib/utils";
 import { CreditCard, ExternalLink, Check } from "lucide-react";
@@ -42,7 +43,7 @@ const PLANS = [
 ];
 
 export default function SettingsBillingPage() {
-  const { data: sub, isLoading } = useApi<Subscription>("/api/billing/subscription");
+  const { data: sub, isLoading, error, mutate: reloadSub } = useApi<Subscription>("/api/billing/subscription");
   const [portalLoading, setPortalLoading] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState<string | null>(null);
 
@@ -77,6 +78,8 @@ export default function SettingsBillingPage() {
   };
 
   if (isLoading) return <div className="flex justify-center py-20"><Spinner /></div>;
+  // A failed subscription load must not render as "no plan" — that invites a duplicate checkout.
+  if (error) return <ErrorState error={error} onRetry={() => reloadSub()} />;
 
   return (
     <>

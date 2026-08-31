@@ -4,6 +4,26 @@ Exploration only; nothing here is implemented yet. Verified against the running 
 
 ---
 
+> **Update, 31 Aug 2026 — the U is now built.** `PUT /bookings/{id}` (full update) and
+> `PATCH /bookings/{id}/status` exist, an Edit button and Mark completed / No-show
+> controls are in the detail modal, and conflict 409s now name the clashing booking and
+> its times instead of saying "Booking conflicts detected". `/move` shares its conflict
+> check and job cascade with the new update via `CascadeToJobAsync`, so they cannot drift.
+>
+> **Still not built:** drag-to-move and resize on the grid (`/move` remains uncalled and
+> therefore still never executed), `GET /bookings/{id}` for deep-linking, and the
+> booking-conflict test suite described below. The state table is left as written so the
+> reasoning behind the design survives; treat the note above as current.
+>
+> **Known defects in what was built** (31 Aug 2026, from the review pass — full detail in
+> [review-findings.md](review-findings.md)): `UpdateBookingRequest` and `MoveBookingRequest`
+> have no FluentValidation validators, so an empty GUID returns 404 where the create path
+> returns 400; `PATCH /bookings/{id}/status` can resurrect a `Cancelled` booking that
+> `UpdateBookingAsync` correctly refuses to edit; and `CheckConflictsAsync` is read-then-write
+> with no constraint behind it, so two simultaneous requests can both pass and double-book a
+> capacity-1 bay. The tests listed at the bottom of this file are still unwritten, which is
+> why none of these were caught.
+
 ## Where it stands
 
 | Operation | API | UI |

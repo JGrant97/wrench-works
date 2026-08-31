@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
+using WrenchWorks.Api.Features.Common;
 using WrenchWorks.Api.Middleware;
 using WrenchWorks.Domain.Entities;
 using WrenchWorks.Infrastructure.Persistence;
@@ -101,7 +102,7 @@ public static class MessagingEndpoints
             .Select(m => new MessageDto(m.Id, m.Channel.ToString(), m.To, m.Subject, m.Body, m.Status.ToString(), m.CreatedAtUtc, m.CustomerId, m.JobId))
             .ToListAsync(ct);
 
-        return Results.Ok(new { items, total, page, pageSize });
+        return Results.Ok(new PagedResult<MessageDto>(items, total, page, pageSize));
     }
 
     private static async Task<IResult> RetryAsync(

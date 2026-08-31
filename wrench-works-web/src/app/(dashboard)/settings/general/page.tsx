@@ -7,6 +7,7 @@ import { Button, Input, Card, PageHeader, Spinner } from "@/components/ui";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
+import { ErrorState } from "@/components/data-state";
 import { SettingsNav } from "@/components/settings-nav";
 
 interface BusinessInfo {
@@ -20,7 +21,7 @@ interface BusinessInfo {
 
 export default function SettingsGeneralPage() {
   const canManage = usePermission("settings.manage");
-  const { data: biz, isLoading } = useApi<BusinessInfo>("/api/business");
+  const { data: biz, isLoading, error } = useApi<BusinessInfo>("/api/business");
   const [form, setForm] = useState({ name: "", address: "", phone: "", timezone: "Europe/London", currency: "GBP" });
   const [saving, setSaving] = useState(false);
 
@@ -54,6 +55,8 @@ export default function SettingsGeneralPage() {
   };
 
   if (isLoading) return <div className="flex justify-center py-20"><Spinner /></div>;
+  // Without this the form renders blank and a save would overwrite real settings with empties.
+  if (error) return <ErrorState error={error} onRetry={() => mutate("/api/business")} />;
 
   return (
     <>

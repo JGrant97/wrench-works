@@ -1,0 +1,16 @@
+namespace WrenchWorks.Api.Features.Common;
+
+/// <summary>
+/// The shape every paginated list endpoint returns.
+///
+/// This exists so list endpoints can return a NAMED type instead of an anonymous
+/// object. Minimal APIs cannot infer a response schema from `Results.Ok(new { ... })`,
+/// so the OpenAPI document carried no response type and Orval generated
+/// `apiClient&lt;void&gt;(...)` for every call — which is why four response-shape bugs
+/// (£NaN totals, blank part names, "0 customers", dead pagination) reached the browser
+/// with TypeScript perfectly happy. See docs/app-flow.md.
+///
+/// The property names match what the API already emitted, so this is not a contract
+/// change — it is the same JSON, now described.
+/// </summary>
+public record PagedResult<T>(IEnumerable<T> Items, int Total, int Page, int PageSize);

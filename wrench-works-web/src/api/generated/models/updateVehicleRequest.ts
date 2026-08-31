@@ -5,23 +5,18 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { UpdateVehicleRequestMake } from './updateVehicleRequestMake';
-import type { UpdateVehicleRequestModel } from './updateVehicleRequestModel';
 import type { UpdateVehicleRequestYear } from './updateVehicleRequestYear';
+import type { UpdateVehicleRequestColourId } from './updateVehicleRequestColourId';
 import type { UpdateVehicleRequestVin } from './updateVehicleRequestVin';
 import type { UpdateVehicleRequestRegistration } from './updateVehicleRequestRegistration';
-import type { UpdateVehicleRequestEngineType } from './updateVehicleRequestEngineType';
-import type { UpdateVehicleRequestFuelType } from './updateVehicleRequestFuelType';
 import type { UpdateVehicleRequestNotes } from './updateVehicleRequestNotes';
 
 export interface UpdateVehicleRequest {
-  make: UpdateVehicleRequestMake;
-  model: UpdateVehicleRequestModel;
+  variantId: string;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   year: UpdateVehicleRequestYear;
+  colourId: UpdateVehicleRequestColourId;
   vin: UpdateVehicleRequestVin;
   registration: UpdateVehicleRequestRegistration;
-  engineType: UpdateVehicleRequestEngineType;
-  fuelType: UpdateVehicleRequestFuelType;
   notes: UpdateVehicleRequestNotes;
 }

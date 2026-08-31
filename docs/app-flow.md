@@ -43,6 +43,9 @@ Key points:
 | `502 {"code":"proxy_error"}` | Web is up, .NET API is unreachable |
 | `401` through the proxy | API is up, token missing/expired — the deny-by-default `FallbackPolicy` |
 | `500 {"code":"internal_error"}` on every data call, `/health` still 200 | Postgres is down. `/health` doesn't check the DB |
+| `409 {"code":"concurrency_conflict"}` | Two writers raced on the same row. Reload and retry — added 31 Aug 2026, previously a bare 500 |
+
+Any of these now render as an **error state with a retry button** rather than as an empty list. Before 31 Aug 2026 no page read SWR's `error`, so a failure and a genuinely empty result were indistinguishable on screen — a dead `/api/zones` told an admin "No zones configured".
 
 ---
 
@@ -149,7 +152,7 @@ This document is not yet a complete description of the system, and it should not
 | `/jobs/new` | client | `/api/customers/search`, `/api/customers/{id}` | customer → vehicle → job |
 | `/customers`, `/customers/[id]` | client | `/api/customers*` | detail shows vehicles + history |
 | `/vehicles` | client | `/api/customers/search` | **no list endpoint exists** — search-driven by design |
-| `/vehicles/[id]` | client | `/api/vehicles/{id}`, `/{id}/history` | service history |
+| `/vehicles/[id]` | client | `/api/vehicles/{id}`, `/{id}/history`, `/api/catalogue/*` | service history; Edit hydrates the catalogue picker from the vehicle's variant |
 | `/inventory` | client | `/api/inventory/items`, `/categories` | stock levels, low-stock flag, adjustments |
 | `/settings/general` | client | `/api/business` | name, phone, address, timezone, currency |
 | `/settings/zones` | client | `/api/zones` | bays + capacity |
@@ -186,30 +189,30 @@ Four of these shared a root cause: **pages hand-declare TypeScript interfaces fo
 4. **Pagination never rendered on jobs or customers.** Same cause as #3: `Math.ceil(undefined / pageSize)` → `NaN`, and `NaN > 1` is `false`, so the Prev/Next block was permanently hidden and nothing past record 20 was reachable. **Fixed** by the same change.
 5. **Every conditional query fired a real request to `/null`.** `useApiQuery` typed `basePath` as `string` and interpolated it into a template literal, so callers using SWR's conditional-fetch idiom (`search.length >= 2 ? "/api/customers/search" : null`) produced the key `"null"` and a live `GET /null → 404`. This also made `npm run build` fail with five type errors. **Fixed** in `hooks/use-api.ts`: `basePath` is now `string | null` and a null short-circuits to a null SWR key.
 
+### Fixed — round two, 30–31 Aug 2026
+
+Everything below was on the "still open" list and is now closed. Root causes kept, per the revise-never-delete rule.
+
+6. **The `sub` claim never arrived, so `CurrentUserService.UserId` was always null.** ASP.NET's JwtBearer handler remaps inbound standard claims unless told not to, so the `sub` emitted by `JwtTokenService` reached the app as `ClaimTypes.NameIdentifier`. The custom claims (`business_id`, `business_user_id`, `permission`, `feature`) are untouched, which is exactly why tenancy and authorization worked and nobody noticed. Two effects: `/api/users/me` 401'd for **everyone**, and every `CreatedByUserId` audit column was written null — confirmed across all 20 rows in the dev database at the time. **Fixed** with one line in `Program.cs`: `options.MapInboundClaims = false`. Pinned by `UserAccessTests`. Note the columns written null before the fix are still null; nothing backfills them.
+7. **`/api/users/me` sat inside a group requiring `users.manage`**, so even after the claim fix a non-admin could not read their own profile. **Fixed** — it is now outside that group and needs only authentication.
+8. **Validation errors were unreadable in the UI, everywhere.** `ErrorHandlingMiddleware` returns validation failures as `{ code, errors: [{ field, message }] }` with **no top-level `message`**, while `ApiError` (`lib/fetcher.ts`) read only `data.message` and otherwise fell back to `` `Request failed with status ${status}` ``. Every *other* exception type in that middleware emits `message`, so validation was the single case that hit the fallback — and the case where the user most needed the text. Verified in-browser: a 20-character VIN returned a precise FluentValidation message and the toast read "Request failed with status 400". **Fixed** in `ApiError`, which now reads `errors[]` and exposes `fieldErrors` and `details`. One change; every form in the product.
+9. **`recentJobs` on customer detail was always empty** — the page expected the array, `CustomerDetailDto` never returned one. **Fixed server-side**: the DTO and its query now include recent jobs.
+10. **Status badges rendered the raw enum** (`InProgress`, `WaitingParts`) while the filter dropdown showed them spaced. **Fixed** with a `statusLabel()` display map.
+11. **Two of the four Adjust Stock reasons were invalid and always failed.** The dropdown offered Manual Adjustment, **Restock**, Damaged, **Returned**; the `StockMovementReason` enum has `ManualAdjustment, JobConsumption, JobReturn, PurchaseReceived, Correction, Damaged, Other`, so `Enum.TryParse` rejected two of the four. Verified in-browser: Restock returned 400, toast read "Invalid reason", stock untouched. **Fixed** — the dropdown is now generated from the real enum values.
+12. **Adding a vehicle captured less than editing one** — `AddVehicleModal` had only Make/Model/Year/Registration/VIN while the edit modal exposed engine, fuel and notes. **Fixed** by the catalogue rewrite: both modals now use the same `VehicleCataloguePicker`.
+13. **A vehicle could be created entirely blank.** No field carried `required` and `CreateVehicleValidator` asserted only `CustomerId`, so an empty submit created a real row rendering as "Unnamed". **Fixed** — `variantId` and `year` are required and re-validated server-side against the variant's range.
+14. **Duplicate registrations were allowed.** `VehicleConfiguration` indexes `(BusinessId, Registration)` but deliberately not `IsUnique()`, and `CreateAsync` did no duplicate check — two records for one plate split a vehicle's history silently. **Fixed** with `EnsureRegistrationIsFreeAsync`, which names the customer and vehicle already holding the plate. Note the check is read-then-write with no unique index behind it, so a genuine race can still slip through — see finding 8 in [review-findings.md](review-findings.md).
+
+### Corrected — this was reported here and was wrong
+
+- **"The invite flow is a dead end."** Reported as: memberships are created `Pending`, login requires `Active`, nothing transitions between them. **That was wrong.** `VerifyEmailEndpoint` activates pending memberships; the test that "pinned" the bug set `EmailVerified` directly in the database, bypassing the very endpoint that does the activation, and so proved nothing. The test was rewritten to go through `/api/auth/verify-email` and it passes. Kept here rather than deleted because the failure mode — a test that reproduces a bug by skipping the code that prevents it — is worth recognising again.
+
 ### Still open
 
-- **The `sub` claim never arrives, so `CurrentUserService.UserId` is always null.** ASP.NET's JwtBearer handler remaps inbound standard claims unless told not to, so the `sub` emitted by `JwtTokenService` reaches the app as `ClaimTypes.NameIdentifier`. The custom claims (`business_id`, `business_user_id`, `permission`, `feature`) are untouched, which is exactly why tenancy and authorization work and nobody noticed. Two effects: `/api/users/me` 401s for **everyone** (`RequireUserId()` throws), and every `CreatedByUserId` audit column is written null — confirmed across all 20 rows in the dev database. One-line fix: `options.MapInboundClaims = false`. Pinned by `UserAccessTests`.
-
-- **The invite flow is a dead end.** Invited memberships are created `Pending`; login requires `Active` and 403s otherwise; nothing anywhere transitions between them. The invite returns 201 and sends an email to an account that can never sign in. Pinned by `UserAccessTests`.
-
-- **`/api/users/me` is also inside a group requiring `users.manage`**, so even after the claim fix a non-admin could not read their own profile. Nothing calls it today — `/api/auth/me` is the only caller and nothing in the web app calls *that*; the session hydrates entirely from the `ww_user` cookie. Both are dead code until someone wires them up.
-
-- **The client never re-verifies identity after login.** `useAuth` reads permissions and features from the readable `ww_user` cookie and never calls the server again. If an admin changes someone's role, that user's UI keeps the old permissions until the 24h cookie expires. The server still rejects the actions, so this is a display-consistency issue rather than a hole — but there is no way to refresh a session short of logging out.
-
-- **Validation errors are unreadable in the UI, everywhere.** `ErrorHandlingMiddleware` returns validation failures as `{ code, errors: [{ field, message }] }` with **no top-level `message`**, while `ApiError` (`lib/fetcher.ts`) reads only `data.message` and otherwise falls back to `` `Request failed with status ${status}` ``. Every *other* exception type in that middleware emits `message`, so validation is the single case that hits the fallback — and the case where the user most needs the text. Verified in the browser: a 20-character VIN on Add Vehicle returned `{"code":"validation_error","errors":[{"field":"Vin","message":"The length of 'Vin' must be 17 characters or fewer. You entered 20 characters."}]}` and the toast read "Request failed with status 400". This silently degrades **every form in the product**; fixing `ApiError` to read `errors[]` fixes all of them at once.
-
-- **`recentJobs` on customer detail is always empty.** The page expects a `recentJobs` array, but `CustomerDetailDto` never returns one. Unlike the others this isn't a naming mismatch — the field doesn't exist server-side, so fixing it means adding jobs to the DTO and its query.
-- **Status badges render the raw enum** (`InProgress`, `WaitingParts`) while the filter dropdown shows them spaced ("In Progress"). `JOB_STATUS_COLORS` is keyed on the raw values, so what's missing is a display-label map.
-- **`npm run lint` is not configured.** It drops into an interactive ESLint setup prompt, so there is no working lint gate.
+- **The client never re-verifies identity after login.** `useAuth` reads permissions and features from the readable `ww_user` cookie and never calls the server again. If an admin changes someone's role, that user's UI keeps the old permissions until the 24h cookie expires. The server still rejects the actions, so this is display consistency rather than a hole — but there is no way to refresh a session short of logging out.
+- **`npm run lint` is not configured.** It drops into an interactive ESLint setup prompt, so there is no working lint gate; `npm run build` is the real one.
 - **The category dropdown loads all 236 categories inline** on every inventory render (~18 KB of `<option>`s). Fine at this size, not a pattern to scale.
-
-- **Two of the four Adjust Stock reasons are invalid and always fail.** The dropdown in `AdjustStockModal` offers Manual Adjustment, **Restock**, Damaged, **Returned**. The `StockMovementReason` enum is `ManualAdjustment, JobConsumption, JobReturn, PurchaseReceived, Correction, Damaged, Other` — so `Restock` and `Returned` don't exist and `Enum.TryParse` rejects them. Verified in-browser: selecting Restock returns 400 and the toast reads "Invalid reason"; stock and the movement log are untouched. The enum values the UI *should* offer for those two are `PurchaseReceived` and `JobReturn`; `Correction` and `Other` are never offered at all. Half the stock-adjustment UI is dead.
-
-- **Adding a vehicle captures less than editing one.** `CreateVehicleRequest` accepts `EngineType`, `FuelType` and `Notes`, and the edit modal on `/vehicles/[id]` exposes all three — but `AddVehicleModal` (`customers/[id]/page.tsx`) has only Make, Model, Year, Registration, VIN. The only route to engine/fuel/notes is create → navigate → Edit.
-
-- **A vehicle can be created entirely blank.** No field in `AddVehicleModal` carries `required` (the codebase does use it — customer Name, twice), and `CreateVehicleValidator` asserts only `CustomerId` not-empty plus max lengths on Vin (17) and Registration (20). An empty submit creates a real row; the list renders it as "Unnamed" via `[make, model].filter(Boolean).join(" ") || "Unnamed"`, so it degrades gracefully but is still junk data attachable to jobs and bookings. `Year` likewise has no bounds on either side.
-
-- **Duplicate registrations are allowed.** `VehicleConfiguration` declares `HasIndex(e => new { e.BusinessId, e.Registration })` — indexed for lookup, deliberately **not** `IsUnique()` — and `CreateAsync` performs no duplicate check. The customer create path *does* check for duplicate phone/email, so the pattern exists in the codebase and simply wasn't applied here. Two records for one plate splits a vehicle's service history silently.
+- **Everything in [review-findings.md](review-findings.md).** That file is the current open list for defects found by reading the code rather than running it — including one introduced on 31 Aug that breaks vehicle editing outright.
 
 ### Why the Orval migration doesn't fix this class of bug *yet*
 
@@ -222,6 +225,24 @@ Minimal API handlers here return `Task<IResult>` and `Results.Ok(new { ... })` w
 ```
 
 Orval faithfully generates `apiClient<void>(...)` for every one. Request bodies *are* typed (`CreateJobRequest` is `$ref`'d, because those are typed parameters) — responses are not. So migrating a page to the generated client today would give you `void` back and catch none of bugs 1–4.
+
+**Partly lifted, 31 Aug 2026.** Eight read endpoints now declare a response type with `.Produces<T>()`, so the OpenAPI doc carries a real schema for them and Orval generates a typed response:
+
+| Endpoint | Declared as |
+|---|---|
+| `GET /api/catalogue/makes` · `…/models` · `…/years` · `…/variants` · `…/variants/{id}` · `…/colours` | the whole slice, added 31 Aug 2026 |
+| `GET /api/customers` | `PagedResult<CustomerDto>` |
+| `GET /api/customers/{id}` | `CustomerDetailDto` |
+| `GET /api/jobs` | `PagedResult<JobListItemDto>` |
+| `GET /api/jobs/{id}` | `JobDetailDto` |
+| `GET /api/inventory/items` | `PagedResult<InventoryItemDto>` |
+| `GET /api/inventory/items/{id}` | `InventoryItemDto` |
+| `GET /api/inventory/categories` | `List<InventoryCategoryDto>` |
+| `GET /api/vehicles/search` | `List<VehicleSearchResultDto>` |
+
+`PagedResult<T>` (`Features/Common/PagedResult.cs`) exists specifically so the `{ items, total, page, pageSize }` envelope — the thing bugs 3 and 4 were about — has a name in the schema.
+
+These eight are precisely the endpoints behind the four response-shape bugs, so migrating *those* pages to the generated client would now catch that class. **Everything else still returns anonymous objects and still generates `apiClient<void>`** — calendar, zones, users, billing, messaging, catalogue and every write endpoint. The blocker is narrowed, not removed; check for a `.Produces<T>` before assuming a page's migration buys type safety.
 
 For the migration to deliver what it promises, the API has to declare its response types first — `.Produces<T>(200)` on each endpoint, or returning `TypedResults.Ok(dto)` with named response records instead of anonymous objects. **That is the prerequisite**, and it's the highest-leverage change available: it would make this entire bug class impossible rather than merely fixed once.
 

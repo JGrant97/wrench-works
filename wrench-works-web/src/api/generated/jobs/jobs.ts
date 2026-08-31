@@ -10,6 +10,8 @@ import type {
   AddPartToJobRequest,
   CreateJobRequest,
   GetApiJobsParams,
+  JobDetailDto,
+  PagedResultOfJobListItemDto,
   UpdateJobRequest,
   UpdateJobStatusRequest
 } from '.././models';
@@ -21,7 +23,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiJobs = (
     params?: GetApiJobsParams,
  ) => {
-      return apiClient<void>(
+      return apiClient<PagedResultOfJobListItemDto>(
       {url: `/api/jobs`, method: 'GET',
         params
     },
@@ -40,7 +42,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiJobsId = (
     id: string,
  ) => {
-      return apiClient<void>(
+      return apiClient<JobDetailDto>(
       {url: `/api/jobs/${id}`, method: 'GET'
     },
       );

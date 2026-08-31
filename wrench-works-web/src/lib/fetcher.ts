@@ -5,16 +5,61 @@
  * browser never touches it directly.
  */
 
+interface FieldError {
+  field: string;
+  message: string;
+}
+
+interface ApiErrorBody {
+  code?: string;
+  message?: string;
+  /** FluentValidation failures. Present INSTEAD of `message` on a 400. */
+  errors?: FieldError[];
+  /** Extra context, e.g. { conflictingBookingIds: [...] } on a booking 409. */
+  details?: unknown;
+}
+
+/**
+ * Error thrown by every call in `fetcher`.
+ *
+ * The API's error middleware emits `message` for most exception types but validation
+ * failures instead come back as `{ code: "validation_error", errors: [{ field, message }] }`
+ * with no top-level `message`. Reading only `message` therefore turned every failed
+ * form in the product into "Request failed with status 400" while the real, useful
+ * text sat unread in `errors`.
+ */
 export class ApiError extends Error {
   status: number;
   data: unknown;
+  /** Per-field validation failures, when the API sent any. */
+  fieldErrors: FieldError[];
+  /** Extra context the API attached, e.g. conflicting booking ids. */
+  details: unknown;
 
   constructor(status: number, data: unknown) {
-    super(typeof data === "object" && data !== null && "message" in data
-      ? (data as { message: string }).message
-      : `Request failed with status ${status}`);
+    const body = (typeof data === "object" && data !== null ? data : {}) as ApiErrorBody;
+    const fieldErrors = Array.isArray(body.errors) ? body.errors : [];
+
+    super(ApiError.buildMessage(status, body, fieldErrors));
+
     this.status = status;
     this.data = data;
+    this.fieldErrors = fieldErrors;
+    this.details = body.details;
+  }
+
+  private static buildMessage(status: number, body: ApiErrorBody, fieldErrors: FieldError[]): string {
+    // Validation: surface the actual field messages, which is what the user needs.
+    if (fieldErrors.length > 0) {
+      return fieldErrors
+        .map((e) => e.message)
+        .filter(Boolean)
+        .join("\n");
+    }
+
+    if (typeof body.message === "string" && body.message.length > 0) return body.message;
+
+    return `Request failed with status ${status}`;
   }
 }
 
