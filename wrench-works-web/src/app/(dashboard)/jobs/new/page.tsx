@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useApiQuery } from "@/hooks/use-api";
+import { useCustomerVehicle } from "@/hooks/use-customer-vehicle";
 import { Button, Card, Input, Select, Textarea, PageHeader } from "@/components/ui";
 import { ArrowLeft } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
@@ -22,17 +22,10 @@ export default function NewJobPage() {
   });
   const [loading, setLoading] = useState(false);
 
-  const { data: searchResults } = useApiQuery<{ id: string; name: string; phone?: string }[]>(
-    customerSearch.length >= 2 && !form.customerId ? "/api/customers/search" : null,
-    { q: customerSearch }
-  );
-
-  // Fetch vehicles for selected customer via the customer detail endpoint
-  const { data: customerDetail } = useApiQuery<{ vehicles: { id: string; displayName: string; registration?: string }[] }>(
-    form.customerId ? `/api/customers/${form.customerId}` : null
-  );
-
-  const vehicles = customerDetail?.vehicles ?? [];
+  // keepSearchingAfterSelect: false — New Job hides the result list once a customer is
+  // picked, so the form reads as a completed step rather than an open search.
+  const { customers: searchResults, vehicles } =
+    useCustomerVehicle(customerSearch, form.customerId, { keepSearchingAfterSelect: false });
 
   const update = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [field]: e.target.value }));

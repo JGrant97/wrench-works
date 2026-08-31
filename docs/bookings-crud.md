@@ -96,7 +96,7 @@ All three should declare response types (`.Produces<BookingDto>(200)` or `TypedR
 
 **2. Resize handles** on a booking block to change duration → the same `/move` call with an adjusted `EndUtc`.
 
-**3. An Edit mode in `BookingDetailModal`** → `PUT /bookings/{id}`. The modal is currently read-only plus Cancel; it already receives `zones`, and the create modal's customer/vehicle search can be lifted into a shared component rather than duplicated.
+**3. An Edit mode in `BookingDetailModal`** → `PUT /bookings/{id}`. ✅ Built. The shared customer/vehicle search this called for also exists now: `hooks/use-customer-vehicle.ts`, used by both New Booking and New Job (31 Aug 2026).
 
 **4. Status controls** in the detail modal — "Mark completed" / "Mark no-show", gated on `usePermission("calendar.edit")` as the Cancel button already is.
 

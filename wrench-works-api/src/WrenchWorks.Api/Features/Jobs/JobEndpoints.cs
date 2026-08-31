@@ -207,10 +207,7 @@ public static class JobEndpoints
         // Sync linked booking if the schedule changed
         if (request.ScheduledStartUtc.HasValue && request.ScheduledEndUtc.HasValue)
         {
-            // Find the linked booking — check both FK directions for robustness
-            var booking = job.BookingId.HasValue
-                ? await db.Bookings.FindAsync([job.BookingId.Value], ct)
-                : await db.Bookings.FirstOrDefaultAsync(b => b.JobId == id, ct);
+            var booking = await FindLinkedBookingAsync(db, job, ct);
 
             if (booking != null)
             {
@@ -227,6 +224,100 @@ public static class JobEndpoints
         return Results.Ok(new { job.Id, job.Title, Status = job.Status.ToString(), Priority = job.Priority.ToString() });
     }
 
+    /// <summary>
+    /// Which statuses a job may move to from each status. Static because it is a fixed
+    /// property of the domain, not per-request state — it was previously rebuilt as a new
+    /// Dictionary on every single status change.
+    /// </summary>
+    private static readonly Dictionary<JobStatus, JobStatus[]> ValidTransitions = new()
+    {
+        [JobStatus.Draft] = [JobStatus.Scheduled, JobStatus.Closed],
+        [JobStatus.Scheduled] = [JobStatus.InProgress, JobStatus.Closed],
+        [JobStatus.InProgress] = [JobStatus.WaitingParts, JobStatus.Completed, JobStatus.Closed],
+        [JobStatus.WaitingParts] = [JobStatus.InProgress, JobStatus.Closed],
+        [JobStatus.Completed] = [JobStatus.Invoiced, JobStatus.Closed],
+        [JobStatus.Invoiced] = [JobStatus.Closed],
+        [JobStatus.Closed] = []
+    };
+
+    /// <summary>
+    /// Jobs and bookings cross-link with two independent nullable FKs and nothing keeps
+    /// them consistent, so both directions have to be checked. Extracted because the same
+    /// lookup appears in UpdateJobAsync.
+    /// </summary>
+    private static async Task<Booking?> FindLinkedBookingAsync(AppDbContext db, Job job, CancellationToken ct)
+        => job.BookingId.HasValue
+            ? await db.Bookings.FindAsync([job.BookingId.Value], ct)
+            : await db.Bookings.FirstOrDefaultAsync(b => b.JobId == job.Id, ct);
+
+    /// <summary>
+    /// Mirrors a job's new status onto its calendar booking. Three cases, and the third is
+    /// the one worth reading twice: moving back to an active status either revives a
+    /// cancelled booking or creates the booking that never existed, which is the only path
+    /// in the codebase that writes a Booking outside the Calendar slice.
+    ///
+    /// Synchronous, and takes the already-loaded booking, so the decision table stays
+    /// readable next to the I/O rather than interleaved with it.
+    /// </summary>
+    private static void SyncBookingToJobStatus(
+        AppDbContext db, Job job, Booking? booking, JobStatus newStatus, Guid? userId)
+    {
+        switch (newStatus)
+        {
+            case JobStatus.Closed:
+                if (booking is { Status: not BookingStatus.Cancelled })
+                    booking.Status = BookingStatus.Cancelled;
+                break;
+
+            case JobStatus.Completed:
+            case JobStatus.Invoiced:
+                if (booking is { Status: BookingStatus.Confirmed })
+                    booking.Status = BookingStatus.Completed;
+                break;
+
+            case JobStatus.Scheduled:
+            case JobStatus.InProgress:
+                ReviveOrCreateBooking(db, job, booking, userId);
+                break;
+        }
+    }
+
+    private static void ReviveOrCreateBooking(AppDbContext db, Job job, Booking? booking, Guid? userId)
+    {
+        var isScheduled = job.ScheduledStartUtc.HasValue && job.ScheduledEndUtc.HasValue;
+
+        if (booking is { Status: BookingStatus.Cancelled })
+        {
+            booking.Status = BookingStatus.Confirmed;
+            if (isScheduled)
+            {
+                booking.StartUtc = job.ScheduledStartUtc!.Value;
+                booking.EndUtc = job.ScheduledEndUtc!.Value;
+            }
+            return;
+        }
+
+        // A job can only acquire a booking if it has somewhere and sometime to be.
+        if (booking != null || !isScheduled || !job.AssignedZoneId.HasValue) return;
+
+        var created = new Booking
+        {
+            BusinessId = job.BusinessId,
+            ZoneId = job.AssignedZoneId.Value,
+            CustomerId = job.CustomerId,
+            VehicleId = job.VehicleId,
+            Title = job.Title,
+            StartUtc = job.ScheduledStartUtc!.Value,
+            EndUtc = job.ScheduledEndUtc!.Value,
+            Status = BookingStatus.Confirmed,
+            CreatedByUserId = userId
+        };
+
+        db.Bookings.Add(created);
+        created.JobId = job.Id;
+        job.BookingId = created.Id;
+    }
+
     private static async Task<IResult> UpdateStatusAsync(
         Guid id,
         UpdateJobStatusRequest request,
@@ -240,81 +331,18 @@ public static class JobEndpoints
         var job = await db.Jobs.FindAsync([id], ct)
             ?? throw new NotFoundException("Job not found");
 
-        // Basic status transition validation
-        var validTransitions = new Dictionary<JobStatus, JobStatus[]>
-        {
-            [JobStatus.Draft] = [JobStatus.Scheduled, JobStatus.Closed],
-            [JobStatus.Scheduled] = [JobStatus.InProgress, JobStatus.Closed],
-            [JobStatus.InProgress] = [JobStatus.WaitingParts, JobStatus.Completed, JobStatus.Closed],
-            [JobStatus.WaitingParts] = [JobStatus.InProgress, JobStatus.Closed],
-            [JobStatus.Completed] = [JobStatus.Invoiced, JobStatus.Closed],
-            [JobStatus.Invoiced] = [JobStatus.Closed],
-            [JobStatus.Closed] = []
-        };
-
-        if (!validTransitions.TryGetValue(job.Status, out var allowed) || !allowed.Contains(newStatus))
+        if (!ValidTransitions.TryGetValue(job.Status, out var allowed) || !allowed.Contains(newStatus))
             return Results.BadRequest(new { code = "validation_error", message = $"Cannot transition from {job.Status} to {newStatus}" });
 
+        var booking = await FindLinkedBookingAsync(db, job, ct);
+
         job.Status = newStatus;
-
-        // Find linked booking (either FK direction)
-        var booking = job.BookingId.HasValue
-            ? await db.Bookings.FindAsync([job.BookingId.Value], ct)
-            : await db.Bookings.FirstOrDefaultAsync(b => b.JobId == id, ct);
-
-        // Sync booking based on new job status
-        if (newStatus == JobStatus.Closed)
-        {
-            // Closing a job → cancel the linked booking
-            if (booking != null && booking.Status != BookingStatus.Cancelled)
-            {
-                booking.Status = BookingStatus.Cancelled;
-            }
-        }
-        else if (newStatus == JobStatus.Completed || newStatus == JobStatus.Invoiced)
-        {
-            // Completing a job → mark booking completed
-            if (booking != null && booking.Status == BookingStatus.Confirmed)
-            {
-                booking.Status = BookingStatus.Completed;
-            }
-        }
-        else if (newStatus == JobStatus.Scheduled || newStatus == JobStatus.InProgress)
-        {
-            // Moving to an active status → restore cancelled booking or create one
-            if (booking != null && booking.Status == BookingStatus.Cancelled)
-            {
-                booking.Status = BookingStatus.Confirmed;
-                // Sync schedule if the job has dates
-                if (job.ScheduledStartUtc.HasValue && job.ScheduledEndUtc.HasValue)
-                {
-                    booking.StartUtc = job.ScheduledStartUtc.Value;
-                    booking.EndUtc = job.ScheduledEndUtc.Value;
-                }
-            }
-            else if (booking == null && job.ScheduledStartUtc.HasValue && job.ScheduledEndUtc.HasValue && job.AssignedZoneId.HasValue)
-            {
-                // No booking exists but job has schedule + zone — create one
-                var newBooking = new Booking
-                {
-                    BusinessId = job.BusinessId,
-                    ZoneId = job.AssignedZoneId.Value,
-                    CustomerId = job.CustomerId,
-                    VehicleId = job.VehicleId,
-                    Title = job.Title,
-                    StartUtc = job.ScheduledStartUtc.Value,
-                    EndUtc = job.ScheduledEndUtc.Value,
-                    Status = BookingStatus.Confirmed,
-                    CreatedByUserId = currentUser.UserId
-                };
-                db.Bookings.Add(newBooking);
-                newBooking.JobId = job.Id;
-                job.BookingId = newBooking.Id;
-            }
-        }
-
+        SyncBookingToJobStatus(db, job, booking, newStatus, currentUser.UserId);
         await db.SaveChangesAsync(ct);
 
+        // Second save: the audit row is written only once the change it records has
+        // actually committed, so a failed status change cannot leave a log saying it
+        // succeeded. (Not atomic — see finding 8 in docs/review-findings.md.)
         db.AuditLogs.Add(new AuditLog
         {
             BusinessId = job.BusinessId,

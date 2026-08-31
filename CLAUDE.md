@@ -114,6 +114,10 @@ npm run generate-api
 
 **Never run `npm run build` while `npm run dev` is running.** They share `.next`, and the production build overwrites the dev server's chunks — the running app then 404s on every `_next/static/*` request until you restart the dev server. Stop dev, build, restart dev.
 
+Worse if you *interrupt* a build that was racing the dev server: `.next` is left half-written, every page returns a bare `Internal Server Error`, and restarting dev alone does not fix it. Recovery is `rm -rf .next` then restart. (Confirmed 31 Aug 2026 — the error surfaced as `ENOENT ... prerender-manifest.json` in the browser console.)
+
+**To type-check without touching `.next`, use `npx tsc --noEmit`.** It is the same check `npm run build` performs, runs in seconds, and is safe with the dev server up — which makes it the right gate while iterating. Still run a full `npm run build` (dev stopped) before calling a change done, since it also catches build-time issues tsc cannot see.
+
 There is no test runner in the web app. Do not add Jest/Vitest/Playwright without asking.
 
 ---
@@ -199,6 +203,15 @@ These exception types are declared in `Middleware/ErrorHandlingMiddleware.cs`. R
 **`Business.Timezone` is stored but never used.** It's editable on `/settings/general` and nothing reads it — every date renders in the *browser's* timezone. Verified: a booking entered as 09:00 on a UTC-5 machine stores as `14:00Z`, so a business configured as `UTC` sees a different time than the person who booked it. Self-consistent within one browser, wrong across two. Settle this before adding more write paths — see [docs/bookings-crud.md](docs/bookings-crud.md).
 
 **Web UI conventions.** Build on the primitives in `src/components/ui` (Radix + Tailwind); compose classes with the `cn()` helper in `@/lib/utils`. Forms use react-hook-form with a Zod resolver. Toasts via react-hot-toast, icons via lucide-react. Don't introduce a competing UI, form, or data-fetching library.
+
+**A page that grows past ~250 lines gets colocated `_components/` and `_lib/` folders.** The underscore makes them private to the App Router, so they sit next to the page they serve without becoming routes. Established 31 Aug 2026 when `calendar/page.tsx` (1002 lines, six components) and `jobs/[id]/page.tsx` (533 lines, three modals) were split:
+
+- `calendar/_lib/booking.ts` — types, layout constants, and the pure lane-packing/multi-day helpers the week and month grids share
+- `calendar/_components/` — `week-view`, `month-view`, and the detail/create/edit modals
+- `jobs/[id]/_lib/job.ts` — types plus `STATUS_TRANSITIONS`, which **mirrors `ValidTransitions` in `JobEndpoints.cs`**; change one and you must change the other
+- `jobs/[id]/_components/` — the add-labor, add-part and edit-job modals
+
+Shared across pages rather than within one, so it lives in `src/hooks`: **`useCustomerVehicle`** (`hooks/use-customer-vehicle.ts`) is the customer-search-then-pick-a-vehicle pair used by New Booking and New Job. Both previously had their own copy including their own inline response types — the duplication `bookings-crud.md` had flagged. Use it rather than re-declaring those shapes.
 
 **Feature and permission gating** in the UI uses `use-permission`, `use-feature`, and `<FeatureGate>` — reuse them rather than reading the session cookie directly.
 

@@ -83,20 +83,10 @@ public static class CalendarEndpoints
 
         var businessId = currentUser.RequireBusinessId();
 
-        // Validate zone exists
-        var zone = await db.Zones.FindAsync([request.ZoneId], ct)
-            ?? throw new NotFoundException("Zone not found");
+        var (zone, customer, vehicle) = await ResolveBookingTargetsAsync(
+            db, request.ZoneId, request.CustomerId, request.VehicleId, ct);
 
-        // Validate customer and vehicle
-        var customer = await db.Customers.FindAsync([request.CustomerId], ct)
-            ?? throw new NotFoundException("Customer not found");
-        var vehicle = await db.Vehicles.FindAsync([request.VehicleId], ct)
-            ?? throw new NotFoundException("Vehicle not found");
-
-        // Check conflicts
-        var conflicts = await CheckConflictsAsync(db, request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, null, ct);
-        if (conflicts.Count > 0)
-            throw new ConflictException("Booking conflicts detected", new { conflictingBookingIds = conflicts });
+        await EnsureSlotIsFreeAsync(db, request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, null, ct);
 
         var booking = new Booking
         {
@@ -111,7 +101,6 @@ public static class CalendarEndpoints
             CreatedByUserId = currentUser.UserId
         };
 
-        // Optionally create a linked job
         Job? linkedJob = null;
         if (request.CreateJob)
         {
@@ -134,7 +123,9 @@ public static class CalendarEndpoints
         db.Bookings.Add(booking);
         await db.SaveChangesAsync(ct);
 
-        // Now set the reverse FK (Job → Booking) without circular insert
+        // Two saves, deliberately: booking.JobId and job.BookingId point at each other, so
+        // the reverse FK can only be set once the first insert has produced a row. Not
+        // atomic — a failure between them leaves a job with no back-reference.
         if (linkedJob != null)
         {
             linkedJob.BookingId = booking.Id;
@@ -178,16 +169,10 @@ public static class CalendarEndpoints
             throw new ValidationException([new FluentValidation.Results.ValidationFailure(
                 nameof(request.StartUtc), "Start must be before end")]);
 
-        var zone = await db.Zones.FindAsync([request.ZoneId], ct)
-            ?? throw new NotFoundException("Zone not found");
-        _ = await db.Customers.FindAsync([request.CustomerId], ct)
-            ?? throw new NotFoundException("Customer not found");
-        _ = await db.Vehicles.FindAsync([request.VehicleId], ct)
-            ?? throw new NotFoundException("Vehicle not found");
+        var (zone, _, _) = await ResolveBookingTargetsAsync(
+            db, request.ZoneId, request.CustomerId, request.VehicleId, ct);
 
-        var conflicts = await CheckConflictsAsync(db, request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, id, ct);
-        if (conflicts.Count > 0)
-            throw new ConflictException("Booking conflicts detected", new { conflictingBookingIds = conflicts });
+        await EnsureSlotIsFreeAsync(db, request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, id, ct);
 
         booking.ZoneId = request.ZoneId;
         booking.CustomerId = request.CustomerId;
@@ -299,6 +284,43 @@ public static class CalendarEndpoints
 
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Loads the zone, customer and vehicle a booking points at, each through its
+    /// tenant-filtered DbSet so another business's row is simply not found.
+    ///
+    /// Extracted because create, update and move each repeated it, and one of the three
+    /// omitting a check is exactly how the job endpoints ended up accepting a foreign zone
+    /// (docs/review-findings.md finding 2). One resolver, one place to get it wrong.
+    /// </summary>
+    private static async Task<(Zone Zone, Customer Customer, Vehicle Vehicle)> ResolveBookingTargetsAsync(
+        AppDbContext db, Guid zoneId, Guid customerId, Guid vehicleId, CancellationToken ct)
+    {
+        var zone = await db.Zones.FindAsync([zoneId], ct)
+            ?? throw new NotFoundException("Zone not found");
+        var customer = await db.Customers.FindAsync([customerId], ct)
+            ?? throw new NotFoundException("Customer not found");
+        var vehicle = await db.Vehicles.FindAsync([vehicleId], ct)
+            ?? throw new NotFoundException("Vehicle not found");
+
+        return (zone, customer, vehicle);
+    }
+
+    // Throws if the slot is already at capacity. Wraps CheckConflictsAsync so callers read
+    // as an assertion rather than as a list they must remember to inspect — forgetting to
+    // check the returned list would silently permit a double booking.
+    //
+    // Plain // rather than ///: the .NET 10 preview OpenAPI XML-comment source generator
+    // emits System.Void for a Task-returning method carrying a <summary> and fails with
+    // CS0673. See the note in CLAUDE.md.
+    private static async Task EnsureSlotIsFreeAsync(
+        AppDbContext db, Guid zoneId, DateTime startUtc, DateTime endUtc,
+        int capacity, Guid? excludeBookingId, CancellationToken ct)
+    {
+        var conflicts = await CheckConflictsAsync(db, zoneId, startUtc, endUtc, capacity, excludeBookingId, ct);
+        if (conflicts.Count > 0)
+            throw new ConflictException("Booking conflicts detected", new { conflictingBookingIds = conflicts });
     }
 
     private static async Task<List<Guid>> CheckConflictsAsync(
