@@ -12,8 +12,10 @@ import type {
   CreateItemRequest,
   GetApiInventoryItemsParams,
   InventoryCategoryDto,
+  InventoryItemCreatedDto,
   InventoryItemDto,
   PagedResultOfInventoryItemDto,
+  StockLevelDto,
   UpdateItemRequest
 } from '.././models';
 
@@ -32,7 +34,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiInventoryCategories = (
     createCategoryRequest: CreateCategoryRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<InventoryCategoryDto>(
       {url: `/api/inventory/categories`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: createCategoryRequest
@@ -51,7 +53,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiInventoryItems = (
     createItemRequest: CreateItemRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<InventoryItemCreatedDto>(
       {url: `/api/inventory/items`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: createItemRequest
@@ -70,7 +72,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     updateItemRequest: UpdateItemRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<InventoryItemDto>(
       {url: `/api/inventory/items/${id}`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
       data: updateItemRequest
@@ -89,7 +91,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     adjustStockRequest: AdjustStockRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<StockLevelDto>(
       {url: `/api/inventory/items/${id}/adjust`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: adjustStockRequest

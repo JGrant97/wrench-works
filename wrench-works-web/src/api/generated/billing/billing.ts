@@ -6,7 +6,10 @@
  * OpenAPI spec version: v1
  */
 import type {
-  CreateCheckoutRequest
+  CheckoutUrlDto,
+  CreateCheckoutRequest,
+  SubscriptionDto,
+  WebhookAckDto
 } from '.././models';
 
 import { apiClient } from '../../../lib/api-client';
@@ -16,7 +19,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiBillingSubscription = (
     
  ) => {
-      return apiClient<void>(
+      return apiClient<SubscriptionDto>(
       {url: `/api/billing/subscription`, method: 'GET'
     },
       );
@@ -24,7 +27,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiBillingCheckout = (
     createCheckoutRequest: CreateCheckoutRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<CheckoutUrlDto>(
       {url: `/api/billing/checkout`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: createCheckoutRequest
@@ -34,7 +37,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiBillingPortal = (
     
  ) => {
-      return apiClient<void>(
+      return apiClient<CheckoutUrlDto>(
       {url: `/api/billing/portal`, method: 'POST'
     },
       );
@@ -42,7 +45,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiBillingWebhook = (
     
  ) => {
-      return apiClient<void>(
+      return apiClient<WebhookAckDto>(
       {url: `/api/billing/webhook`, method: 'POST'
     },
       );

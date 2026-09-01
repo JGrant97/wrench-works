@@ -1,4 +1,5 @@
 using System.Text;
+using WrenchWorks.Api.Features.Common;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -78,6 +79,9 @@ builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler
 builder.Services.AddScoped<IEmailSender, ConsoleEmailSender>();
 builder.Services.AddScoped<ISmsSender, ConsoleSmsSender>();
 builder.Services.AddScoped<IStripeService, StripeService>();
+
+// Per-slice services. See Features/Common/FeatureServices.cs.
+builder.Services.AddFeatureServices();
 builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // ──────────────────── CORS ────────────────────
@@ -148,7 +152,7 @@ MessagingEndpoints.Map(app);
 BillingEndpoints.Map(app);
 
 // ──────────────────── Health check ────────────────────
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }))
+app.MapGet("/health", () => TypedResults.Ok(new HealthDto("healthy", DateTime.UtcNow)))
    .AllowAnonymous()
    .WithTags("System");
 
@@ -164,3 +168,6 @@ using (var scope = app.Services.CreateScope())
 app.Run();
 
 public partial class Program { } // For integration test WebApplicationFactory
+
+
+public record HealthDto(string Status, DateTime Timestamp);

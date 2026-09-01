@@ -7,6 +7,9 @@
  */
 import type {
   GetApiMessagingParams,
+  MessageDto,
+  MessageStatusDto,
+  PagedResultOfMessageDto,
   SendMessageRequest
 } from '.././models';
 
@@ -17,7 +20,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiMessagingSend = (
     sendMessageRequest: SendMessageRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<MessageDto>(
       {url: `/api/messaging/send`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: sendMessageRequest
@@ -27,7 +30,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiMessaging = (
     params?: GetApiMessagingParams,
  ) => {
-      return apiClient<void>(
+      return apiClient<PagedResultOfMessageDto>(
       {url: `/api/messaging`, method: 'GET',
         params
     },
@@ -36,7 +39,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiMessagingIdRetry = (
     id: string,
  ) => {
-      return apiClient<void>(
+      return apiClient<MessageStatusDto>(
       {url: `/api/messaging/${id}/retry`, method: 'POST'
     },
       );

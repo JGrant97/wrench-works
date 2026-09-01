@@ -6,7 +6,10 @@
  * OpenAPI spec version: v1
  */
 import type {
-  InviteUserRequest
+  CurrentUserDto,
+  InviteUserRequest,
+  InvitedUserDto,
+  UserListItemDto
 } from '.././models';
 
 import { apiClient } from '../../../lib/api-client';
@@ -16,7 +19,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiUsersMe = (
     
  ) => {
-      return apiClient<void>(
+      return apiClient<CurrentUserDto>(
       {url: `/api/users/me`, method: 'GET'
     },
       );
@@ -24,7 +27,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiUsers = (
     
  ) => {
-      return apiClient<void>(
+      return apiClient<UserListItemDto[]>(
       {url: `/api/users`, method: 'GET'
     },
       );
@@ -32,7 +35,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiUsersInvite = (
     inviteUserRequest: InviteUserRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<InvitedUserDto>(
       {url: `/api/users/invite`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: inviteUserRequest

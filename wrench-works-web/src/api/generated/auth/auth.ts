@@ -7,8 +7,11 @@
  */
 import type {
   LoginRequest,
+  LoginResponse,
   RegisterRequest,
-  VerifyEmailRequest
+  RegisterResponse,
+  VerifyEmailRequest,
+  VerifyEmailResultDto
 } from '.././models';
 
 import { apiClient } from '../../../lib/api-client';
@@ -18,7 +21,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiAuthRegister = (
     registerRequest: RegisterRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<RegisterResponse>(
       {url: `/api/auth/register`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: registerRequest
@@ -28,7 +31,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiAuthLogin = (
     loginRequest: LoginRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<LoginResponse>(
       {url: `/api/auth/login`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: loginRequest
@@ -38,7 +41,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiAuthVerifyEmail = (
     verifyEmailRequest: VerifyEmailRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<VerifyEmailResultDto>(
       {url: `/api/auth/verify-email`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: verifyEmailRequest
@@ -48,7 +51,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiAuthRefresh = (
     
  ) => {
-      return apiClient<void>(
+      return apiClient<LoginResponse>(
       {url: `/api/auth/refresh`, method: 'POST'
     },
       );

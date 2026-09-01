@@ -262,7 +262,7 @@ with Archive offered in the same dialog.
 
 Both checked against the code:
 
-- **`MoveBookingAsync`'s hand-rolled error body is not a regression.** The C# review called it "reintroduced"; it is at line 161 of `HEAD`, pre-existing. What was added alongside it was the *correct* version in `UpdateBookingAsync`. The inconsistency is real; the attribution was wrong.
+- **`MoveBookingAsync`'s hand-rolled error body is not a regression.** The C# review called it "reintroduced"; it is at line 161 of `HEAD`, pre-existing. What was added alongside it was the *correct* version in `UpdateBookingAsync`. The inconsistency is real; the attribution was wrong. **Resolved 1 Sep 2026** — the TypedResults migration converted all sixteen ad-hoc `Results.BadRequest` bodies (this one included) to thrown exceptions, so the inconsistency is gone rather than merely attributed correctly.
 - **`CustomerEndpoints.UpdateAsync`'s missing validation is likewise pre-existing**, not introduced by the `RecentJobs` change that touched the file.
 
 ## What was checked and found clean

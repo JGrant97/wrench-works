@@ -24,12 +24,23 @@ Next.js route handler  /api/[...path]/route.ts
    ▼
 .NET API  http://localhost:5000/api/jobs
    │  JWT validated → CurrentUserService → ITenantProvider
+   ▼
+JobEndpoints.ListAsync            ← thin: calls the service, wraps in TypedResults
+   ▼
+IJobService → JobService          ← the actual work; returns a DTO, throws on failure
    │  EF global query filter injects BusinessId
    ▼
 PostgreSQL
 ```
 
 Key points:
+
+- **Endpoints hold no logic.** Since 1 Sep 2026 every slice has an `I<Feature>Service`
+  registered in `Features/Common/FeatureServices.cs`; the handler injects it, calls one
+  method and wraps the result. DTOs and validators live in `Dtos/` and `Validators/`
+  beside it. See rule 5 in CLAUDE.md for the layout and the two traps it exposed.
+  *Verified*: the OpenAPI document is byte-identical before and after the move — same 78
+  endpoints, same statuses, same schemas — so this changed no contract.
 
 - **The browser never sees the JWT.** It lives in the `ww_token` httpOnly cookie. The proxy is what turns a cookie into a bearer token, which is why the frontend can't call `:5000` directly.
 - **Paths are 1:1.** `proxy()` forwards `url.pathname` unchanged, so `/api/jobs` on the web maps to `/api/jobs` on the API. The only reason the catch-all exists is the cookie→bearer hop.
@@ -216,39 +227,44 @@ Everything below was on the "still open" list and is now closed. Root causes kep
 - **The category dropdown loads all 236 categories inline** on every inventory render (~18 KB of `<option>`s). Fine at this size, not a pattern to scale.
 - **Everything in [review-findings.md](review-findings.md).** That file is the current open list for defects found by reading the code rather than running it — including one introduced on 31 Aug that breaks vehicle editing outright.
 
-### Why the Orval migration doesn't fix this class of bug *yet*
+### Why the Orval migration used not to fix this class of bug — and now does
 
-The obvious conclusion is "use the generated client and these become compile errors". That is **not true today**, and it's worth understanding why before relying on it.
+**Resolved 1 Sep 2026.** The reasoning is kept because it is the argument that justified the
+change, and because the trap it describes recurs the moment anyone writes `Task<IResult>`.
 
-Minimal API handlers here return `Task<IResult>` and `Results.Ok(new { ... })` with anonymous objects. Minimal APIs can't infer a response type from that, so the OpenAPI document has no response schema:
+The problem was that minimal API handlers returned `Task<IResult>` with
+`Results.Ok(new { ... })`. Minimal APIs cannot infer a response type from that, so the
+OpenAPI document carried no response schema:
 
 ```json
 "/api/jobs": { "get": { "responses": { "200": { "description": "OK" } } } }
 ```
 
-Orval faithfully generates `apiClient<void>(...)` for every one. Request bodies *are* typed (`CreateJobRequest` is `$ref`'d, because those are typed parameters) — responses are not. So migrating a page to the generated client today would give you `void` back and catch none of bugs 1–4.
+Orval faithfully generated `apiClient<void>` for every one. Request bodies *were* typed
+(`CreateJobRequest` is `$ref`'d, because those are typed parameters) — responses were not.
+So migrating a page to the generated client bought no protection at all against bugs 1–4,
+which is why the migration was not treated as the fix for them.
 
-**Partly lifted, 31 Aug 2026.** Eight read endpoints now declare a response type with `.Produces<T>()`, so the OpenAPI doc carries a real schema for them and Orval generates a typed response:
+**The fix, 1 Sep 2026: the whole API moved from `IResult` to `TypedResults`.** All 77
+handlers now declare a concrete return type (`Task<Ok<JobDetailDto>>`,
+`Task<Created<ZoneDto>>`, `Task<NoContent>`, and three-way unions on the auth endpoints),
+and the ~20 anonymous response objects became named records. The 28 hand-written
+`.Produces<T>()` calls were deleted, because the return type now supplies both the schema
+and the status code.
 
-| Endpoint | Declared as |
-|---|---|
-| `GET /api/catalogue/makes` · `…/models` · `…/years` · `…/variants` · `…/variants/{id}` · `…/colours` | the whole slice, added 31 Aug 2026 |
-| `GET /api/customers` | `PagedResult<CustomerDto>` |
-| `GET /api/customers/{id}` | `CustomerDetailDto` |
-| `GET /api/jobs` | `PagedResult<JobListItemDto>` |
-| `GET /api/jobs/{id}` | `JobDetailDto` |
-| `GET /api/inventory/items` | `PagedResult<InventoryItemDto>` |
-| `GET /api/inventory/items/{id}` | `InventoryItemDto` |
-| `GET /api/inventory/categories` | `List<InventoryCategoryDto>` |
-| `GET /api/vehicles/search` | `List<VehicleSearchResultDto>` |
-| `GET /api/dashboard` | `DashboardDto` |
-| `GET /api/tax/rates` and the four write endpoints | `TaxRateDto` |
+*Verified*: 78 of 78 endpoints carry a 2xx response schema (was 26), and `apiClient<void>`
+in the generated client dropped from 78 to 9 — precisely the nine `DELETE`s that really do
+return 204. `npm run build` and all 63 API tests pass.
 
-`PagedResult<T>` (`Features/Common/PagedResult.cs`) exists specifically so the `{ items, total, page, pageSize }` envelope — the thing bugs 3 and 4 were about — has a name in the schema.
+**So the prerequisite is met: migrating a page to the generated client now does catch this
+bug class.** A page reading `line.inventoryItemName` when the DTO says `itemName` is a
+compile error today, for every endpoint rather than eight of them.
 
-These eight are precisely the endpoints behind the four response-shape bugs, so migrating *those* pages to the generated client would now catch that class. **Everything else still returns anonymous objects and still generates `apiClient<void>`** — calendar, zones, users, billing, messaging, catalogue and every write endpoint. The blocker is narrowed, not removed; check for a `.Produces<T>` before assuming a page's migration buys type safety.
-
-For the migration to deliver what it promises, the API has to declare its response types first — `.Produces<T>(200)` on each endpoint, or returning `TypedResults.Ok(dto)` with named response records instead of anonymous objects. **That is the prerequisite**, and it's the highest-leverage change available: it would make this entire bug class impossible rather than merely fixed once.
+One finding worth carrying forward: `.Produces<List<CatalogueVariantDto>>()` on
+`GET /catalogue/variants` had been declaring a type the handler never returned — the handler
+returned `IEnumerable<>`. A hand-written `.Produces` is an unchecked assertion, so the
+mismatch was invisible; under `TypedResults` it became `CS0029` and stopped the build. That
+is the difference between documenting a response type and *having* one.
 
 ## Still undecided
 

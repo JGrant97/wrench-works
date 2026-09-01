@@ -6,6 +6,9 @@
  * OpenAPI spec version: v1
  */
 import type {
+  BookingActionResultDto,
+  BookingDto,
+  BookingStatusDto,
   CreateBookingRequest,
   GetApiCalendarBookingsParams,
   MoveBookingRequest,
@@ -20,7 +23,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiCalendarBookings = (
     params: GetApiCalendarBookingsParams,
  ) => {
-      return apiClient<void>(
+      return apiClient<BookingDto[]>(
       {url: `/api/calendar/bookings`, method: 'GET',
         params
     },
@@ -29,7 +32,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiCalendarBookings = (
     createBookingRequest: CreateBookingRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<BookingDto>(
       {url: `/api/calendar/bookings`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: createBookingRequest
@@ -40,7 +43,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     updateBookingRequest: UpdateBookingRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<BookingActionResultDto>(
       {url: `/api/calendar/bookings/${id}`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
       data: updateBookingRequest
@@ -59,7 +62,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     moveBookingRequest: MoveBookingRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<BookingActionResultDto>(
       {url: `/api/calendar/bookings/${id}/move`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
       data: moveBookingRequest
@@ -70,7 +73,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     updateBookingStatusRequest: UpdateBookingStatusRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<BookingStatusDto>(
       {url: `/api/calendar/bookings/${id}/status`, method: 'PATCH',
       headers: {'Content-Type': 'application/json', },
       data: updateBookingStatusRequest

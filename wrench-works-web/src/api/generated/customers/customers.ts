@@ -9,6 +9,8 @@ import type {
   ArchiveResultDto,
   CreateCustomerRequest,
   CustomerDetailDto,
+  CustomerDto,
+  CustomerSearchResultDto,
   GetApiCustomersParams,
   GetApiCustomersSearchParams,
   PagedResultOfCustomerDto,
@@ -31,7 +33,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiCustomers = (
     createCustomerRequest: CreateCustomerRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<CustomerDto>(
       {url: `/api/customers`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: createCustomerRequest
@@ -50,7 +52,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     updateCustomerRequest: UpdateCustomerRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<CustomerDto>(
       {url: `/api/customers/${id}`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
       data: updateCustomerRequest
@@ -68,7 +70,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiCustomersSearch = (
     params: GetApiCustomersSearchParams,
  ) => {
-      return apiClient<void>(
+      return apiClient<CustomerSearchResultDto[]>(
       {url: `/api/customers/search`, method: 'GET',
         params
     },

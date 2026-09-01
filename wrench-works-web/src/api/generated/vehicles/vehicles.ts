@@ -10,6 +10,8 @@ import type {
   CreateVehicleRequest,
   GetApiVehiclesSearchParams,
   UpdateVehicleRequest,
+  VehicleDto,
+  VehicleHistoryItemDto,
   VehicleSearchResultDto
 } from '.././models';
 
@@ -29,7 +31,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiVehicles = (
     createVehicleRequest: CreateVehicleRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<VehicleDto>(
       {url: `/api/vehicles`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: createVehicleRequest
@@ -40,7 +42,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     updateVehicleRequest: UpdateVehicleRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<VehicleDto>(
       {url: `/api/vehicles/${id}`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
       data: updateVehicleRequest
@@ -50,7 +52,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiVehiclesId = (
     id: string,
  ) => {
-      return apiClient<void>(
+      return apiClient<VehicleDto>(
       {url: `/api/vehicles/${id}`, method: 'GET'
     },
       );
@@ -66,7 +68,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiVehiclesIdHistory = (
     id: string,
  ) => {
-      return apiClient<void>(
+      return apiClient<VehicleHistoryItemDto[]>(
       {url: `/api/vehicles/${id}/history`, method: 'GET'
     },
       );

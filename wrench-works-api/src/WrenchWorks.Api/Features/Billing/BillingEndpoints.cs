@@ -1,14 +1,6 @@
-using Microsoft.EntityFrameworkCore;
-using WrenchWorks.Api.Auth;
-using WrenchWorks.Api.Middleware;
-using WrenchWorks.Domain.Entities;
-using WrenchWorks.Infrastructure.Persistence;
-using WrenchWorks.Infrastructure.Stripe;
+using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace WrenchWorks.Api.Features.Billing;
-
-public record CreateCheckoutRequest(string Plan, string SuccessUrl, string CancelUrl);
-public record SubscriptionDto(string Plan, string Status, DateTime? CurrentPeriodEnd, int UserLimit, int ZoneLimit, bool InventoryEnabled, bool MessagingEnabled);
 
 public static class BillingEndpoints
 {
@@ -22,63 +14,23 @@ public static class BillingEndpoints
         group.MapPost("/webhook", HandleWebhookAsync).AllowAnonymous();
     }
 
-    private static async Task<IResult> GetSubscriptionAsync(AppDbContext db, CurrentUserService currentUser, CancellationToken ct)
+    private static async Task<Ok<SubscriptionDto>> GetSubscriptionAsync(
+        IBillingService svc, CancellationToken ct) =>
+        TypedResults.Ok(await svc.GetSubscriptionAsync(ct));
+
+    private static async Task<Ok<CheckoutUrlDto>> CreateCheckoutAsync(
+        IBillingService svc, CreateCheckoutRequest request, CancellationToken ct) =>
+        TypedResults.Ok(await svc.CreateCheckoutAsync(request, ct));
+
+    private static async Task<Ok<CheckoutUrlDto>> CreatePortalAsync(
+        IBillingService svc, CancellationToken ct) =>
+        TypedResults.Ok(await svc.CreatePortalAsync(ct));
+
+    // Reading the body is an HTTP concern, so it happens here and the service takes a string.
+    private static async Task<Ok<WebhookAckDto>> HandleWebhookAsync(
+        HttpContext context, IBillingService svc, CancellationToken ct)
     {
-        var businessId = currentUser.RequireBusinessId();
-        var sub = await db.BusinessSubscriptions.FirstOrDefaultAsync(s => s.BusinessId == businessId, ct);
-        if (sub == null) return Results.NotFound();
-
-        return Results.Ok(new SubscriptionDto(sub.Plan, sub.Status.ToString(), sub.CurrentPeriodEndUtc, sub.UserLimit, sub.ZoneLimit, sub.InventoryEnabled, sub.MessagingEnabled));
-    }
-
-    private static async Task<IResult> CreateCheckoutAsync(
-        CreateCheckoutRequest request,
-        AppDbContext db,
-        CurrentUserService currentUser,
-        IStripeService stripeService,
-        CancellationToken ct)
-    {
-        var businessId = currentUser.RequireBusinessId();
-        var url = await stripeService.CreateCheckoutSessionAsync(businessId, request.Plan, request.SuccessUrl, request.CancelUrl, ct);
-        return Results.Ok(new { url });
-    }
-
-    private static async Task<IResult> CreatePortalAsync(
-        AppDbContext db,
-        CurrentUserService currentUser,
-        IStripeService stripeService,
-        CancellationToken ct)
-    {
-        var businessId = currentUser.RequireBusinessId();
-        var sub = await db.BusinessSubscriptions.FirstOrDefaultAsync(s => s.BusinessId == businessId, ct)
-            ?? throw new NotFoundException("No subscription found");
-
-        if (string.IsNullOrEmpty(sub.StripeCustomerId))
-            throw new ConflictException("No Stripe customer linked");
-
-        var url = await stripeService.CreateCustomerPortalSessionAsync(sub.StripeCustomerId, "http://localhost:3000/settings/billing", ct);
-        return Results.Ok(new { url });
-    }
-
-    private static async Task<IResult> HandleWebhookAsync(
-        HttpContext context,
-        AppDbContext db,
-        IConfiguration config,
-        CancellationToken ct)
-    {
-        // TODO: Verify Stripe signature using config["Stripe:WebhookSecret"]
-        // For now, stub implementation
-        var body = await new StreamReader(context.Request.Body).ReadToEndAsync(ct);
-
-        // Parse event type and handle:
-        // - checkout.session.completed -> create/update subscription
-        // - customer.subscription.updated -> update plan/status/limits
-        // - customer.subscription.deleted -> mark cancelled
-        // - invoice.payment_succeeded -> update status to Active
-        // - invoice.payment_failed -> update status to PastDue
-
-        // Idempotency: check event ID hasn't been processed before
-
-        return Results.Ok(new { received = true });
+        var rawBody = await new StreamReader(context.Request.Body).ReadToEndAsync(ct);
+        return TypedResults.Ok(await svc.HandleWebhookAsync(rawBody, ct));
     }
 }

@@ -159,13 +159,61 @@ Pages and layouts stay server components. Add `"use client"` only where you genu
 
 ### 5. Vertical slices on the API
 
-Everything a feature needs lives in one folder under `src/WrenchWorks.Api/Features/<Feature>/`: request records, response DTOs, FluentValidation validators, and the static `*Endpoints` class with `Map(IEndpointRouteBuilder app)` plus its private handler methods. `Features/Jobs/JobEndpoints.cs` is the reference shape.
+Everything a feature needs lives in one folder under `src/WrenchWorks.Api/Features/<Feature>/`.
+Restructured 1 Sep 2026 — the layout is now four parts, and `Features/Zones/` is the
+reference shape because it is small enough to read in one go:
 
-- No controllers. No shared cross-feature service layer — a slice may use `AppDbContext` and infrastructure services directly.
-- Register each new slice with an explicit `<Feature>Endpoints.Map(app);` line in the "Map Feature Endpoints" block of `Program.cs`.
-- Group routes with `app.MapGroup("/api/<feature>").WithTags("<Feature>").RequireAuthorization()`; the tag drives Orval's `tags-split` output folder, so keep it stable and meaningful.
-- Handlers return `IResult`, take `AppDbContext` (and other services) as parameters, and accept a `CancellationToken`.
-- Validators live beside the request record and are picked up by `AddValidatorsFromAssemblyContaining<Program>()`.
+```
+Features/Zones/
+  Dtos/                 one file per record   (CreateZoneRequest, UpdateZoneRequest, ZoneDto)
+  Validators/           one file per validator (CreateZoneValidator, UpdateZoneValidator)
+  IZoneService.cs       what the slice does
+  ZoneService.cs        how it does it        (holds AppDbContext and the domain logic)
+  ZoneEndpoints.cs      Map() + thin handlers (holds nothing but HTTP)
+```
+
+- No controllers. **A per-slice service is the rule, not a shared cross-feature service
+  layer** — `IZoneService` lives in `Features/Zones/` and is used by nothing outside it,
+  so the slice boundary is unchanged. There is still no `Services/` folder at the root and
+  no service used by two slices.
+- **The endpoint is the HTTP shell; the service is everything else.** Handlers do one
+  thing: call the service and wrap the result. Anything that touches the database,
+  validates, or decides business rules belongs in the service.
+- **Service methods return DTOs, never `IResult`.** Failures throw the exception types in
+  `ErrorHandlingMiddleware`, so the service never mentions a status code. The two auth
+  endpoints are the deliberate exception: a failed login is a valid answer rather than an
+  error, so `ILoginService` returns a `LoginOutcome` and `LoginEndpoint` maps it to
+  401/403/200. Reach for that only when the status really is part of the contract.
+- Register each new slice **twice**: `<Feature>Endpoints.Map(app);` in the "Map Feature
+  Endpoints" block of `Program.cs`, and `services.AddScoped<I…Service, …Service>();` in
+  `Features/Common/FeatureServices.cs`. Nothing is discovered by convention, so a missing
+  registration throws on the first request rather than degrading silently.
+- Group routes with `app.MapGroup("/api/<feature>").WithTags("<Feature>").RequireAuthorization()`;
+  the tag drives Orval's `tags-split` output folder, so keep it stable and meaningful.
+- Handlers return a **concrete `TypedResults` type** — `Task<Ok<JobDetailDto>>`,
+  `Task<Created<ZoneDto>>`, `Task<NoContent>` — take `I<Feature>Service` and a
+  `CancellationToken`. Never `Task<IResult>`: it erases the response type, which is what
+  produced the `apiClient<void>` problem below. Where an endpoint genuinely has more than
+  one success-or-auth status, use a union
+  (`Results<Ok<LoginResponse>, UnauthorizedHttpResult, ProblemHttpResult>`) rather than
+  falling back to `IResult`.
+- Validators live in `Validators/` and are still picked up by
+  `AddValidatorsFromAssemblyContaining<Program>()`; services call
+  `ValidateAndThrowAsync` themselves, as the handlers used to.
+- `Features/Common/` is the exception to all of the above: `Archiving`, `PagedResult` and
+  `TaxCalculator` are shared helpers, already one purpose per file, and deliberately have
+  no `Dtos/` split.
+
+**Two traps this restructure exposed**, both worth knowing before touching the layout again:
+
+- **A `Task`-returning service method cannot carry an XML doc comment.** The .NET 10
+  OpenAPI XML-comment source generator emits `System.Void` for it and the build fails with
+  `CS0673` in generated code you never wrote. `Task<T>` is fine. Seven `///` comments on
+  `DeleteAsync`-style methods had to become plain `//`. Same trap as the one already
+  recorded for `CalendarEndpoints`/`VehicleEndpoints`.
+- **A required parameter cannot follow an optional one**, so the injected
+  `I<Feature>Service` goes **first** in a handler signature, before `int page = 1`. Minimal
+  APIs bind by type and name rather than position, so first is always safe.
 
 ### 6. Every new endpoint gets an integration test
 
@@ -197,7 +245,9 @@ Not every entity is tenant-scoped: `Business` and `User` are global by design, a
 | `LimitReachedException` | 422 | `limit_reached` |
 | anything else | 500 | `internal_error` (logged, message not leaked) |
 
-These exception types are declared in `Middleware/ErrorHandlingMiddleware.cs`. Reuse them rather than returning ad-hoc `Results.BadRequest(new { ... })` — a few older handlers still do that, and it produces an inconsistent client contract.
+These exception types are declared in `Middleware/ErrorHandlingMiddleware.cs`. Reuse them rather than returning ad-hoc `Results.BadRequest(new { ... })`. As of 1 Sep 2026 **no handler does** — the sixteen that did were converted to throws during the TypedResults migration, which is also what let their return types collapse to a single `Ok<T>`.
+
+**A `ValidationException` thrown with a bare message has no `Errors`.** FluentValidation's `ValidationException(string)` leaves the collection empty, and `ApiError` on the web reads `errors[]` first and `message` second — so such a throw would have reached the user as "Request failed with status 400", the same bug fixed on 31 Aug one layer up. The middleware now falls back to `message` when `Errors` is empty. *Verified 1 Sep 2026*: a missing field returns `{code:"validation_error",errors:[…],message:null}` and a duplicate register returns `{code:"conflict",message:"Email already registered"}`.
 
 **Delete removes a row only when nothing references it; everything else archives.** Decided 31 Aug 2026. `IArchivable` (`Domain/Entities/BaseEntity.cs`) adds `ArchivedAtUtc` to `Customer`, `Vehicle`, `Job` and `InventoryItem`; `Zone` keeps its existing `IsActive` instead. `Features/Common/Archiving.cs` holds the rule: `EnsureDeletable` counts dependents and throws a 409 naming them ("This customer has 1 vehicle, 9 jobs, 10 bookings…"), and the UI offers archiving in the same dialog (`components/record-actions.tsx`).
 
@@ -283,13 +333,22 @@ The job line-item endpoints load lines from those unfiltered sets and rely on a 
 
 `TenantIsolationTests` is the template for tenant-boundary tests: register two businesses through `/api/auth/register`, flip `EmailVerified` directly in the DB (login is blocked until verified, and the token otherwise only reaches `ConsoleEmailSender`), log both in, then assert across the boundary. Assert on the **stored rows** as well as the status code — a handler that returns 404 but still deleted the row would pass a status-only check.
 
-**Response types: the list and detail endpoints now declare them; the rest don't yet.** Minimal APIs cannot infer a schema from `Results.Ok(new { ... })`, so anonymous returns produce `"200": { "description": "OK" }` and Orval emits `apiClient<void>`. That is what let four response-shape bugs reach the browser with TypeScript happy.
+**RESOLVED 1 Sep 2026 — every endpoint now declares its response type.** Kept in full because the root cause is the most expensive one this project has had.
+
+The cause: minimal APIs cannot infer a schema from `Results.Ok(new { ... })`, so a handler typed `Task<IResult>` returning an anonymous object produced `"200": { "description": "OK" }` and Orval emitted `apiClient<void>`. That is what let four response-shape bugs reach the browser with TypeScript perfectly happy.
 
 Fixed for the endpoints that caused them: paginated lists now return the named `PagedResult<T>` (`Features/Common/PagedResult.cs`) and jobs/customers/inventory list + detail carry `.Produces<T>()`. Verified — `GET /api/jobs` `$ref`s `PagedResultOfJobListItemDto`, and the client generates `apiClient<PagedResultOfJobListItemDto>` with `laborTotal`, `partsTotal` and `total` present.
 
 The whole Catalogue slice followed on 31 Aug 2026 — all six `GET /api/catalogue/*` endpoints declare their type, so Orval generates `CatalogueMakeDto[]`, `CatalogueVariantDto[]`, `CatalogueVariantDetailDto` and so on rather than `void`. Verified by grepping the generated `api/generated/catalogue/catalogue.ts` after `npm run generate-api`.
 
-**Still to do:** every write endpoint (POST/PUT/PATCH/DELETE) and the remaining slices — calendar, zones, users, billing, business — still return anonymous objects and still generate `void`. Add `.Produces<T>()` as you touch them; a named record beats an anonymous object every time.
+**The fix was structural, not endpoint-by-endpoint.** All 77 `Task<IResult>` handlers became concrete `TypedResults` types, and the ~20 anonymous return objects became named records. `.Produces<T>()` was then **deleted everywhere** — 28 calls — because `TypedResults` derives the schema *and* the status code from the return type, which a hand-written `.Produces` cannot be checked against.
+
+*Verified 1 Sep 2026*: the OpenAPI doc went from 26 typed 2xx responses to **78 of 78**, and `apiClient<void>` in the generated client fell from 78 to **9** — exactly the nine `DELETE`s that really do return 204. `npx tsc --noEmit` and `npm run build` both clean; all 63 API tests pass.
+
+Two things worth keeping:
+
+- **It caught a lie immediately.** `.Produces<List<CatalogueVariantDto>>()` on `GET /catalogue/variants` was declaring a type the handler never returned (it returned `IEnumerable<>`). Under `.Produces` that mismatch is invisible; under `TypedResults` it is `CS0029` and the build stops. That is the whole argument for the change in one example.
+- **Enums still serialise as numbers.** There is no `JsonStringEnumConverter` configured, which is why handlers call `.ToString()` on every status. `JobCreatedDto.Status` was deliberately left as the `JobStatus` enum to preserve the existing wire format — it is the one endpoint that returns a numeric status, and it was already doing so.
 
 **FIXED — the `sub` claim now arrives.** `Program.cs` sets `options.MapInboundClaims = false`. Without it the JwtBearer handler remapped `sub` to `ClaimTypes.NameIdentifier`, so `CurrentUserService.UserId` was always null: `/api/users/me` returned 401 for everyone including Admins, and `Job`/`Booking`/`StockMovement.CreatedByUserId` were written null on every row ever created (8/8 bookings, 8/8 jobs, 4/4 movements in the dev database — all pre-fix rows still are). The custom claims were never remapped, which is why tenancy and permissions worked and this went unnoticed for so long. `/api/users/me` was also moved out of the `users.manage` group so a non-admin can read their own profile. Guarded by `UserAccessTests`.
 
@@ -305,7 +364,7 @@ The whole Catalogue slice followed on 31 Aug 2026 — all six `GET /api/catalogu
 
 **`npm run lint` is not configured** — it drops into an interactive ESLint setup prompt. There is no working lint gate; `npm run build` (which type-checks) is the real one.
 
-**Some handlers return ad-hoc error bodies.** e.g. `CreateCategoryAsync` returns `Results.BadRequest(new { code, message })` directly instead of throwing. New code should throw the middleware's exception types.
+**FIXED 1 Sep 2026 — no handler returns an ad-hoc error body.** Sixteen did, all shaped `Results.BadRequest(new { code = "validation_error", message = ... })` (eight in `JobEndpoints`, four in `VerifyEmailEndpoint`, two in `InventoryEndpoints`, one each in `CalendarEndpoints` and `MessagingEndpoints`), plus `Results.Conflict` in `RegisterEndpoint` and bare `Results.NotFound()` in `BillingEndpoints`/`UserEndpoints`. All now throw the middleware's exception types. The status codes are unchanged; the two `NotFound()` calls gained a message where they previously returned an empty body.
 
 ---
 

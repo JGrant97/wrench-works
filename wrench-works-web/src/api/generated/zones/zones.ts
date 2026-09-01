@@ -7,7 +7,8 @@
  */
 import type {
   CreateZoneRequest,
-  UpdateZoneRequest
+  UpdateZoneRequest,
+  ZoneDto
 } from '.././models';
 
 import { apiClient } from '../../../lib/api-client';
@@ -17,7 +18,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiZones = (
     
  ) => {
-      return apiClient<void>(
+      return apiClient<ZoneDto[]>(
       {url: `/api/zones`, method: 'GET'
     },
       );
@@ -25,7 +26,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiZones = (
     createZoneRequest: CreateZoneRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<ZoneDto>(
       {url: `/api/zones`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: createZoneRequest
@@ -36,7 +37,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     updateZoneRequest: UpdateZoneRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<ZoneDto>(
       {url: `/api/zones/${id}`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
       data: updateZoneRequest

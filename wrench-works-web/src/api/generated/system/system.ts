@@ -5,6 +5,10 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
+import type {
+  HealthDto
+} from '.././models';
+
 import { apiClient } from '../../../lib/api-client';
 
 
@@ -12,7 +16,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getHealth = (
     
  ) => {
-      return apiClient<void>(
+      return apiClient<HealthDto>(
       {url: `/health`, method: 'GET'
     },
       );

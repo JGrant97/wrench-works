@@ -6,6 +6,7 @@
  * OpenAPI spec version: v1
  */
 import type {
+  BusinessDto,
   UpdateBusinessRequest
 } from '.././models';
 
@@ -16,7 +17,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiBusiness = (
     
  ) => {
-      return apiClient<void>(
+      return apiClient<BusinessDto>(
       {url: `/api/business`, method: 'GET'
     },
       );
@@ -24,7 +25,7 @@ import { apiClient } from '../../../lib/api-client';
   export const putApiBusiness = (
     updateBusinessRequest: UpdateBusinessRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<BusinessDto>(
       {url: `/api/business`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
       data: updateBusinessRequest

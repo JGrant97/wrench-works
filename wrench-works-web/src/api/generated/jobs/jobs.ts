@@ -11,8 +11,13 @@ import type {
   ArchiveResultDto,
   CreateJobRequest,
   GetApiJobsParams,
+  JobCreatedDto,
   JobDetailDto,
+  JobStatusDto,
+  JobSummaryDto,
+  LaborLineDto,
   PagedResultOfJobListItemDto,
+  PartLineDto,
   UpdateJobRequest,
   UpdateJobStatusRequest
 } from '.././models';
@@ -33,7 +38,7 @@ import { apiClient } from '../../../lib/api-client';
   export const postApiJobs = (
     createJobRequest: CreateJobRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<JobCreatedDto>(
       {url: `/api/jobs`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: createJobRequest
@@ -52,7 +57,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     updateJobRequest: UpdateJobRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<JobSummaryDto>(
       {url: `/api/jobs/${id}`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
       data: updateJobRequest
@@ -71,7 +76,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     updateJobStatusRequest: UpdateJobStatusRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<JobStatusDto>(
       {url: `/api/jobs/${id}/status`, method: 'PATCH',
       headers: {'Content-Type': 'application/json', },
       data: updateJobStatusRequest
@@ -82,7 +87,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     addPartToJobRequest: AddPartToJobRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<PartLineDto>(
       {url: `/api/jobs/${id}/parts`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: addPartToJobRequest
@@ -93,7 +98,7 @@ import { apiClient } from '../../../lib/api-client';
     id: string,
     addLaborLineRequest: AddLaborLineRequest,
  ) => {
-      return apiClient<void>(
+      return apiClient<LaborLineDto>(
       {url: `/api/jobs/${id}/labor`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: addLaborLineRequest

@@ -16,8 +16,15 @@ public class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorHandling
         {
             context.Response.StatusCode = 400;
             context.Response.ContentType = "application/json";
-            var errors = ex.Errors.Select(e => new { field = e.PropertyName, message = e.ErrorMessage });
-            await context.Response.WriteAsJsonAsync(new { code = "validation_error", errors });
+            var errors = ex.Errors.Select(e => new { field = e.PropertyName, message = e.ErrorMessage }).ToList();
+
+            // FluentValidation's ValidationException(string) leaves Errors empty, and ApiError on
+            // the web reads errors[] first and message second. Without this fallback a bare-message
+            // throw reaches the user as "Request failed with status 400" -- the same bug fixed on
+            // 31 Aug 2026, one layer down.
+            await context.Response.WriteAsJsonAsync(errors.Count > 0
+                ? new { code = "validation_error", errors, message = (string?)null }
+                : new { code = "validation_error", errors, message = (string?)ex.Message });
         }
         catch (ConflictException ex)
         {
