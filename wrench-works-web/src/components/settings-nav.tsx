@@ -4,11 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/hooks/use-auth";
-import { Building2, Grid3X3, Users, CreditCard } from "lucide-react";
+import { Building2, Grid3X3, Users, CreditCard, Receipt } from "lucide-react";
 
 const SETTINGS_ITEMS = [
   { href: "/settings/general", icon: Building2, label: "General", permission: null as string | null },
   { href: "/settings/zones", icon: Grid3X3, label: "Zones / Bays", permission: "settings.manage" },
+  { href: "/settings/tax", icon: Receipt, label: "Tax", permission: "settings.manage" },
   { href: "/settings/users", icon: Users, label: "Users & Roles", permission: "users.manage" },
   { href: "/settings/billing", icon: CreditCard, label: "Billing", permission: "billing.manage" },
 ];

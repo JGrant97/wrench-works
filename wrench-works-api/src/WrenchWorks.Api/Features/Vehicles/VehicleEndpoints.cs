@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
+using WrenchWorks.Api.Features.Common;
 using WrenchWorks.Api.Middleware;
 using WrenchWorks.Domain.Entities;
 using WrenchWorks.Infrastructure.Persistence;
@@ -63,6 +64,11 @@ public static class VehicleEndpoints
         group.MapPut("/{id:guid}", UpdateAsync).RequireAuthorization("vehicles.manage");
         group.MapGet("/{id:guid}", GetAsync).RequireAuthorization("vehicles.view");
         group.MapGet("/{id:guid}/history", GetHistoryAsync).RequireAuthorization("vehicles.view");
+        group.MapDelete("/{id:guid}", DeleteAsync).RequireAuthorization("vehicles.manage");
+        group.MapPost("/{id:guid}/archive", ArchiveAsync).RequireAuthorization("vehicles.manage")
+             .Produces<ArchiveResultDto>();
+        group.MapPost("/{id:guid}/unarchive", UnarchiveAsync).RequireAuthorization("vehicles.manage")
+             .Produces<ArchiveResultDto>();
     }
 
     /// <summary>
@@ -98,6 +104,40 @@ public static class VehicleEndpoints
             .ToListAsync(ct);
 
         return Results.Ok(results);
+    }
+
+    private static async Task<IResult> DeleteAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var vehicle = await db.Vehicles.FindAsync([id], ct)
+            ?? throw new NotFoundException("Vehicle not found");
+
+        Archiving.EnsureDeletable("vehicle",
+            new Dependent("jobs", await db.Jobs.CountAsync(j => j.VehicleId == id, ct)),
+            new Dependent("bookings", await db.Bookings.CountAsync(b => b.VehicleId == id, ct)));
+
+        db.Vehicles.Remove(vehicle);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ArchiveAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var vehicle = await db.Vehicles.FindAsync([id], ct)
+            ?? throw new NotFoundException("Vehicle not found");
+
+        var result = Archiving.Archive(vehicle, id);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> UnarchiveAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var vehicle = await db.Vehicles.FindAsync([id], ct)
+            ?? throw new NotFoundException("Vehicle not found");
+
+        var result = Archiving.Unarchive(vehicle, id);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> CreateAsync(

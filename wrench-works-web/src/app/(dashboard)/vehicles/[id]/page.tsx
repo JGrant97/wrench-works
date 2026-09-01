@@ -4,14 +4,16 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
+import { useCurrency } from "@/hooks/use-currency";
 import { usePermission } from "@/hooks/use-permission";
 import { Button, Badge, Card, Modal, Input, Textarea, PageHeader, Spinner } from "@/components/ui";
-import { formatDate, formatCurrency, JOB_STATUS_COLORS, statusLabel } from "@/lib/utils";
+import { formatDate, JOB_STATUS_COLORS, statusLabel } from "@/lib/utils";
 import { ArrowLeft, Pencil } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
 import { ErrorState } from "@/components/data-state";
+import { RecordActions } from "@/components/record-actions";
 import { VehicleCataloguePicker, type CatalogueSelection } from "@/components/vehicle-catalogue-picker";
 
 interface VehicleDetail {
@@ -32,6 +34,7 @@ interface HistoryItem {
 }
 
 export default function VehicleDetailPage() {
+  const { format } = useCurrency();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const canManage = usePermission("vehicles.manage");
@@ -61,7 +64,23 @@ export default function VehicleDetailPage() {
 
       <PageHeader title={displayName}
         description={<span><Link href={`/customers/${vehicle.customerId}`} className="text-brand-600 hover:underline dark:text-brand-400">{vehicle.customerName}</Link>{vehicle.year ? ` · ${vehicle.year}` : ""}{vehicle.registration ? ` · ${vehicle.registration}` : ""}</span> as unknown as string}
-        actions={canManage ? <Button variant="secondary" onClick={() => setShowEdit(true)}><Pencil size={14} /> Edit</Button> : undefined}
+        actions={
+          <div className="flex items-center gap-2">
+            {canManage && (
+              <Button variant="secondary" onClick={() => setShowEdit(true)}>
+                <Pencil size={14} /> Edit
+              </Button>
+            )}
+            <RecordActions
+              resource="vehicles"
+              id={id}
+              label="vehicle"
+              canManage={canManage}
+              onChanged={() => mutate(`/api/vehicles/${id}`)}
+              afterDelete={() => router.push(`/customers/${vehicle.customerId}`)}
+            />
+          </div>
+        }
       />
 
       <div className="grid grid-cols-3 gap-6">
@@ -86,7 +105,7 @@ export default function VehicleDetailPage() {
                   <div className="flex items-center justify-between p-3 rounded-lg bg-surface-50 hover:bg-surface-100 transition-colors cursor-pointer">
                     <div><p className="text-sm font-medium text-surface-900">{h.title}</p><p className="text-xs text-surface-500">{formatDate(h.createdAtUtc)}</p></div>
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium">{formatCurrency(h.laborTotal + h.partsTotal)}</span>
+                      <span className="text-sm font-medium">{format(h.laborTotal + h.partsTotal)}</span>
                       <Badge className={JOB_STATUS_COLORS[h.status]}>{statusLabel(h.status)}</Badge>
                     </div>
                   </div>

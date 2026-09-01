@@ -18,11 +18,11 @@ import {
   Settings,
   LogOut,
   Briefcase,
-  ChevronLeft,
-} from "lucide-react";
+  ChevronLeft, LayoutDashboard } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/calendar", icon: Calendar, label: "Calendar", permission: "calendar.view", feature: null as string | null },
+  { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard", permission: "jobs.view", feature: null as string | null },
+  { href: "/calendar", icon: Calendar, label: "Calendar", permission: "calendar.view", feature: null },
   { href: "/jobs", icon: Briefcase, label: "Jobs", permission: "jobs.view", feature: null },
   { href: "/customers", icon: Users, label: "Customers", permission: "customers.view", feature: null },
   { href: "/vehicles", icon: Car, label: "Vehicles", permission: "vehicles.view", feature: null },

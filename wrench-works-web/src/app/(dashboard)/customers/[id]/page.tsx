@@ -4,14 +4,16 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
+import { useCurrency } from "@/hooks/use-currency";
 import { usePermission } from "@/hooks/use-permission";
 import { Button, Badge, Card, Modal, Input, Textarea, PageHeader, Spinner } from "@/components/ui";
-import { formatDate, formatCurrency, JOB_STATUS_COLORS, statusLabel } from "@/lib/utils";
+import { formatDate, JOB_STATUS_COLORS, statusLabel } from "@/lib/utils";
 import { ArrowLeft, Plus, Car, Phone, Mail, MapPin, Pencil } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
 import { ErrorState } from "@/components/data-state";
+import { RecordActions } from "@/components/record-actions";
 import { VehicleCataloguePicker, type CatalogueSelection } from "@/components/vehicle-catalogue-picker";
 
 interface Vehicle {
@@ -34,6 +36,7 @@ interface CustomerDetail {
 }
 
 export default function CustomerDetailPage() {
+  const { format } = useCurrency();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const canManage = usePermission("customers.manage");
@@ -53,7 +56,26 @@ export default function CustomerDetailPage() {
         <ArrowLeft size={14} /> Back
       </button>
 
-      <PageHeader title={customer.name} actions={canManage ? <Button variant="secondary" onClick={() => setShowEditCustomer(true)}><Pencil size={14} /> Edit</Button> : undefined} />
+      <PageHeader
+        title={customer.name}
+        actions={
+          <div className="flex items-center gap-2">
+            {canManage && (
+              <Button variant="secondary" onClick={() => setShowEditCustomer(true)}>
+                <Pencil size={14} /> Edit
+              </Button>
+            )}
+            <RecordActions
+              resource="customers"
+              id={id}
+              label="customer"
+              canManage={canManage}
+              onChanged={() => mutate(`/api/customers/${id}`)}
+              afterDelete={() => router.push("/customers")}
+            />
+          </div>
+        }
+      />
 
       <div className="grid grid-cols-3 gap-6">
         {/* Info */}
@@ -127,7 +149,7 @@ export default function CustomerDetailPage() {
                         </p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium">{formatCurrency(j.total)}</span>
+                        <span className="text-sm font-medium">{format(j.total)}</span>
                         <Badge className={JOB_STATUS_COLORS[j.status]}>{statusLabel(j.status)}</Badge>
                       </div>
                     </div>

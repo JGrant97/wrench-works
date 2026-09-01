@@ -7,6 +7,19 @@ public class Business : BaseEntity
     public string? Phone { get; set; }
     public string Timezone { get; set; } = "UTC";
     public string Currency { get; set; } = "GBP";
+
+    // ── Tax (see docs/tax.md) ──
+    /// <summary>
+    /// UK B2C garages quote tax-inclusive; the US never does. This inverts the arithmetic
+    /// in TaxCalculator rather than just the display.
+    /// </summary>
+    public bool PricesIncludeTax { get; set; }
+
+    /// <summary>VAT number / EIN. Legally required on a VAT invoice.</summary>
+    public string? TaxRegistrationNumber { get; set; }
+
+    /// <summary>The word printed on invoices: "VAT", "Sales Tax", "GST".</summary>
+    public string TaxLabel { get; set; } = "Tax";
     public string? LogoUrl { get; set; }
     public string? WorkingHoursJson { get; set; }
 

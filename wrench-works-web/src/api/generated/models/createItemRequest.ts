@@ -26,4 +26,5 @@ export interface CreateItemRequest {
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   reorderThreshold: CreateItemRequestReorderThreshold;
   compatibilityTagsJson: CreateItemRequestCompatibilityTagsJson;
+  isConsumable?: boolean;
 }

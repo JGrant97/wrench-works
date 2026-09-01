@@ -66,7 +66,7 @@ On successful login the **route handler**, not the API, sets two cookies (`lib/s
 | Cookie | httpOnly | Holds | Read by |
 |---|---|---|---|
 | `ww_token` | **yes** | the JWT | `proxy()` / `apiClient` server-side |
-| `ww_user` | no | id, name, email, businessId, businessName, permissions, features | `use-auth` on the client |
+| `ww_user` | no | id, name, email, businessId, businessName, **currency**, permissions, features | `use-auth` on the client, `getCurrency()` on the server |
 
 Both expire after 24h, matching the JWT.
 
@@ -144,9 +144,10 @@ This document is not yet a complete description of the system, and it should not
 
 | Route | Component type | Calls | Notes |
 |---|---|---|---|
-| `/` | server | — | redirects to `/login` or `/calendar` |
+| `/` | server | — | redirects to `/login` or `/dashboard` |
 | `/login`, `/register`, `/verify-email` | client | `/api/auth/*` route handlers | the only cookie-setting paths |
-| `/calendar` | client | `/api/calendar/bookings?from=&to=`, `/api/zones` | landing page. Week/Month, zone filter. Create + cancel only — **no drag-to-move, no edit**; see [bookings-crud.md](bookings-crud.md) |
+| `/dashboard` | **server** | `GET /api/dashboard` via the generated client | landing page after login. Today's schedule, active jobs, jobs by status, low stock, revenue this vs last month. The first page written to rules 3–4 |
+| `/calendar` | client | `/api/calendar/bookings?from=&to=`, `/api/zones`, `PUT /bookings/{id}/move` | Week/Month, zone filter, create, edit, cancel, and **drag-to-move** (31 Aug 2026) |
 | `/jobs` | client | `/api/jobs?page=&pageSize=&status=&search=` | list + status filter + search |
 | `/jobs/[id]` | client | `/api/jobs/{id}`, `/api/zones`, `/api/inventory/items` | the real workhorse — see below |
 | `/jobs/new` | client | `/api/customers/search`, `/api/customers/{id}` | customer → vehicle → job |
@@ -154,8 +155,9 @@ This document is not yet a complete description of the system, and it should not
 | `/vehicles` | client | `/api/customers/search` | **no list endpoint exists** — search-driven by design |
 | `/vehicles/[id]` | client | `/api/vehicles/{id}`, `/{id}/history`, `/api/catalogue/*` | service history; Edit hydrates the catalogue picker from the vehicle's variant |
 | `/inventory` | client | `/api/inventory/items`, `/categories` | stock levels, low-stock flag, adjustments |
-| `/settings/general` | client | `/api/business` | name, phone, address, timezone, currency |
+| `/settings/general` | client | `/api/business`, `POST /api/auth/refresh` | name, phone, address, timezone; currency is a GBP/USD/EUR dropdown that refreshes the session so the new symbol applies at once |
 | `/settings/zones` | client | `/api/zones` | bays + capacity |
+| `/settings/tax` | client | `/api/tax/rates` | tax rates, defaults per labour/parts, optional jurisdiction breakdown — see [tax.md](tax.md) |
 | `/settings/users` | client | `/api/users`, `/api/users/invite` | roles per member |
 | `/settings/billing` | client | `/api/billing/subscription`, `/checkout`, `/portal` | plan cards → Stripe Checkout |
 
@@ -239,6 +241,8 @@ Orval faithfully generates `apiClient<void>(...)` for every one. Request bodies 
 | `GET /api/inventory/items/{id}` | `InventoryItemDto` |
 | `GET /api/inventory/categories` | `List<InventoryCategoryDto>` |
 | `GET /api/vehicles/search` | `List<VehicleSearchResultDto>` |
+| `GET /api/dashboard` | `DashboardDto` |
+| `GET /api/tax/rates` and the four write endpoints | `TaxRateDto` |
 
 `PagedResult<T>` (`Features/Common/PagedResult.cs`) exists specifically so the `{ items, total, page, pageSize }` envelope — the thing bugs 3 and 4 were about — has a name in the schema.
 

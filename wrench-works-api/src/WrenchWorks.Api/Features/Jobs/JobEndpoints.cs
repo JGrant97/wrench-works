@@ -26,9 +26,19 @@ public record JobDetailDto(
     IEnumerable<LaborLineDto> LaborLines,
     IEnumerable<PartLineDto> PartLines,
     decimal LaborTotal, decimal PartsTotal, decimal GrandTotal,
+    // Net excludes tax, Gross includes it. With tax-inclusive pricing GrandTotal == Gross
+    // and the labour/parts totals are already gross, which is why SubTotal is stated
+    // separately rather than left for the client to derive.
+    decimal SubTotal, decimal TaxTotal, string TaxLabel, bool PricesIncludeTax,
+    bool CustomerIsTaxExempt,
+    IEnumerable<TaxLineDto> TaxBreakdown,
     DateTime CreatedAtUtc);
-public record LaborLineDto(Guid Id, string Description, decimal Hours, decimal Rate, decimal Total);
-public record PartLineDto(Guid Id, Guid InventoryItemId, string ItemName, string? Sku, decimal Quantity, decimal UnitPrice, decimal Total);
+public record LaborLineDto(Guid Id, string Description, decimal Hours, decimal Rate, decimal Total, decimal TaxRatePercent, decimal TaxAmount);
+public record PartLineDto(Guid Id, Guid InventoryItemId, string ItemName, string? Sku, decimal Quantity, decimal UnitPrice, decimal Total, decimal TaxRatePercent, decimal TaxAmount);
+
+/// <summary>One row of the tax summary, with its jurisdiction split when the rate has one.</summary>
+public record TaxLineDto(string Name, decimal RatePercent, decimal Amount, IEnumerable<TaxComponentLineDto> Components);
+public record TaxComponentLineDto(string Name, decimal RatePercent);
 
 // Validators
 public class CreateJobValidator : AbstractValidator<CreateJobRequest>
@@ -57,12 +67,18 @@ public static class JobEndpoints
         group.MapPost("/{id:guid}/labor", AddLaborAsync).RequireAuthorization("jobs.edit");
         group.MapDelete("/{id:guid}/parts/{lineId:guid}", RemovePartAsync).RequireAuthorization("jobs.edit");
         group.MapDelete("/{id:guid}/labor/{lineId:guid}", RemoveLaborAsync).RequireAuthorization("jobs.edit");
+        group.MapDelete("/{id:guid}", DeleteAsync).RequireAuthorization("jobs.delete");
+        group.MapPost("/{id:guid}/archive", ArchiveAsync).RequireAuthorization("jobs.delete")
+             .Produces<ArchiveResultDto>();
+        group.MapPost("/{id:guid}/unarchive", UnarchiveAsync).RequireAuthorization("jobs.delete")
+             .Produces<ArchiveResultDto>();
     }
 
     private static async Task<IResult> ListAsync(
         AppDbContext db,
         int page = 1, int pageSize = 25,
         string? status = null, string? search = null,
+        bool includeArchived = false,
         CancellationToken ct = default)
     {
         var query = db.Jobs
@@ -70,6 +86,8 @@ public static class JobEndpoints
             .Include(j => j.Vehicle)
             .Include(j => j.AssignedZone)
             .AsQueryable();
+
+        if (!includeArchived) query = query.Where(j => j.ArchivedAtUtc == null);
 
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<JobStatus>(status, true, out var st))
             query = query.Where(j => j.Status == st);
@@ -99,6 +117,49 @@ public static class JobEndpoints
         return Results.Ok(new PagedResult<JobListItemDto>(items, total, page, pageSize));
     }
 
+    /// <summary>
+    /// A job may be deleted outright only while it is still a Draft — nothing has been
+    /// worked, billed or booked against it, so there is no history to lose. Once it has
+    /// been scheduled or beyond it is archived instead: labor and part lines are its own
+    /// children and would cascade away with it, taking the record of what the customer
+    /// was charged and why stock left the shelf.
+    /// </summary>
+    private static async Task<IResult> DeleteAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var job = await db.Jobs.FindAsync([id], ct)
+            ?? throw new NotFoundException("Job not found");
+
+        if (job.Status != JobStatus.Draft)
+            throw new ConflictException(
+                $"A {job.Status} job cannot be deleted because it carries billing and stock history. " +
+                "Archive it instead — it will be hidden from lists while its history stays intact.");
+
+        Archiving.EnsureDeletable("job",
+            new Dependent("labour lines", await db.JobLaborLines.CountAsync(l => l.JobId == id, ct)),
+            new Dependent("part lines", await db.JobPartLines.CountAsync(p => p.JobId == id, ct)),
+            new Dependent("bookings", await db.Bookings.CountAsync(b => b.JobId == id, ct)));
+
+        db.Jobs.Remove(job);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ArchiveAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var job = await db.Jobs.FindAsync([id], ct) ?? throw new NotFoundException("Job not found");
+        var result = Archiving.Archive(job, id);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> UnarchiveAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var job = await db.Jobs.FindAsync([id], ct) ?? throw new NotFoundException("Job not found");
+        var result = Archiving.Unarchive(job, id);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(result);
+    }
+
     private static async Task<IResult> GetAsync(Guid id, AppDbContext db, CancellationToken ct)
     {
         var job = await db.Jobs
@@ -110,10 +171,25 @@ public static class JobEndpoints
             .FirstOrDefaultAsync(j => j.Id == id, ct)
             ?? throw new NotFoundException("Job not found");
 
-        var laborLines = job.LaborLines.Select(l => new LaborLineDto(l.Id, l.Description, l.Hours, l.Rate, l.Hours * l.Rate));
-        var partLines = job.PartLines.Select(p => new PartLineDto(p.Id, p.InventoryItemId, p.InventoryItem.Name, p.InventoryItem.Sku, p.Quantity, p.UnitPrice, p.Quantity * p.UnitPrice));
+        var laborLines = job.LaborLines.Select(l => new LaborLineDto(l.Id, l.Description, l.Hours, l.Rate, l.Hours * l.Rate, l.TaxRatePercent, l.TaxAmount));
+        var partLines = job.PartLines.Select(p => new PartLineDto(p.Id, p.InventoryItemId, p.InventoryItem.Name, p.InventoryItem.Sku, p.Quantity, p.UnitPrice, p.Quantity * p.UnitPrice, p.TaxRatePercent, p.TaxAmount));
         var laborTotal = job.LaborLines.Sum(l => l.Hours * l.Rate);
         var partsTotal = job.PartLines.Sum(p => p.Quantity * p.UnitPrice);
+
+        var business = await db.Businesses.FindAsync([job.BusinessId], ct);
+        var pricesIncludeTax = business?.PricesIncludeTax ?? false;
+
+        // Totals come from the SNAPSHOTTED amounts, never recomputed from current rates —
+        // a rate change must not silently rewrite what a past job was charged.
+        var taxTotal = job.LaborLines.Sum(l => l.TaxAmount) + job.PartLines.Sum(p => p.TaxAmount);
+        var lineTotal = laborTotal + partsTotal;
+
+        // With inclusive pricing the line amounts already contain the tax, so the net is
+        // what is left after removing it. With exclusive pricing they are the net already.
+        var subTotal = pricesIncludeTax ? lineTotal - taxTotal : lineTotal;
+        var grandTotal = pricesIncludeTax ? lineTotal : lineTotal + taxTotal;
+
+        var breakdown = await BuildTaxBreakdownAsync(db, job, ct);
 
         return Results.Ok(new JobDetailDto(
             job.Id, job.Title, job.Status.ToString(), job.Priority.ToString(),
@@ -124,8 +200,58 @@ public static class JobEndpoints
             job.InternalNotes, job.CustomerNotes,
             job.ScheduledStartUtc, job.ScheduledEndUtc,
             laborLines, partLines,
-            laborTotal, partsTotal, laborTotal + partsTotal,
+            laborTotal, partsTotal, grandTotal,
+            subTotal, taxTotal,
+            business?.TaxLabel ?? "Tax",
+            pricesIncludeTax,
+            job.Customer.IsTaxExempt,
+            breakdown,
             job.CreatedAtUtc));
+    }
+
+    // Groups the job's tax by the rate each line was charged at, so an invoice can show
+    // "VAT 20% — £42.00" rather than one undifferentiated number. Where a rate carries
+    // jurisdiction components they ride along for display; the AMOUNT always comes from the
+    // line snapshots, never from re-summing component percentages, which would drift from
+    // what the customer was actually charged.
+    //
+    // Plain // rather than ///: Task-returning method with a generic return, which the
+    // .NET 10 preview OpenAPI comment generator mishandles. See CLAUDE.md.
+    private static async Task<List<TaxLineDto>> BuildTaxBreakdownAsync(
+        AppDbContext db, Job job, CancellationToken ct)
+    {
+        var byRate = job.LaborLines
+            .Select(l => new { l.TaxRateId, l.TaxRatePercent, l.TaxAmount })
+            .Concat(job.PartLines.Select(p => new { p.TaxRateId, p.TaxRatePercent, p.TaxAmount }))
+            .Where(x => x.TaxAmount != 0m)
+            .GroupBy(x => new { x.TaxRateId, x.TaxRatePercent })
+            .ToList();
+
+        if (byRate.Count == 0) return [];
+
+        var rateIds = byRate.Select(g => g.Key.TaxRateId).OfType<Guid>().ToList();
+
+        // Deliberately does not filter on ArchivedAtUtc: a rate that has since been retired
+        // must still resolve, or a historical job loses the name of the tax it was charged.
+        var rates = await db.TaxRates
+            .Include(r => r.Components)
+            .Where(r => rateIds.Contains(r.Id))
+            .ToListAsync(ct);
+
+        return byRate.Select(g =>
+        {
+            var rate = rates.FirstOrDefault(r => r.Id == g.Key.TaxRateId);
+            var components = rate?.Components
+                .OrderBy(c => c.SortOrder)
+                .Select(c => new TaxComponentLineDto(c.Name, c.Rate))
+                ?? [];
+
+            return new TaxLineDto(
+                rate?.Name ?? "Tax",
+                g.Key.TaxRatePercent,
+                g.Sum(x => x.TaxAmount),
+                components);
+        }).ToList();
     }
 
     private static async Task<IResult> CreateAsync(
@@ -385,6 +511,20 @@ public static class JobEndpoints
             Quantity = request.Quantity,
             UnitPrice = unitPrice
         };
+
+        var business = await db.Businesses.FindAsync([job.BusinessId], ct);
+        // A consumable is taxed as a consumable, not as a part — the whole reason the flag
+        // exists. See docs/tax.md.
+        var category = item.IsConsumable ? TaxCategory.Consumables : TaxCategory.Parts;
+        var (rateId, percent) = await ResolveTaxRateAsync(db, job.CustomerId, category, ct);
+        var taxed = TaxCalculator.CalculateLine(
+            new TaxableLine(partLine.Quantity * partLine.UnitPrice, percent),
+            business?.PricesIncludeTax ?? false);
+
+        partLine.TaxRateId = rateId;
+        partLine.TaxRatePercent = percent;
+        partLine.TaxAmount = taxed.Tax;
+
         db.JobPartLines.Add(partLine);
 
         // Create stock movement
@@ -403,7 +543,28 @@ public static class JobEndpoints
         await db.SaveChangesAsync(ct);
 
         return Results.Created($"/api/jobs/{id}/parts/{partLine.Id}",
-            new PartLineDto(partLine.Id, partLine.InventoryItemId, item.Name, item.Sku, partLine.Quantity, partLine.UnitPrice, partLine.Quantity * partLine.UnitPrice));
+            new PartLineDto(partLine.Id, partLine.InventoryItemId, item.Name, item.Sku, partLine.Quantity, partLine.UnitPrice, partLine.Quantity * partLine.UnitPrice, partLine.TaxRatePercent, partLine.TaxAmount));
+    }
+
+    /// <summary>
+    /// Picks the rate a new line is raised at, and snapshots it.
+    ///
+    /// Returns nothing when the customer is exempt or no rate is mapped to the category —
+    /// a US shop with no labour mapping is stating that labour is not taxable there, which
+    /// is a real answer rather than a missing setting.
+    /// </summary>
+    private static async Task<(Guid? RateId, decimal Percent)> ResolveTaxRateAsync(
+        AppDbContext db, Guid customerId, TaxCategory category, CancellationToken ct)
+    {
+        var customer = await db.Customers.FindAsync([customerId], ct);
+        if (customer is { IsTaxExempt: true }) return (null, 0m);
+
+        var mapping = await db.TaxRateCategories
+            .Include(m => m.TaxRate)
+            .Where(m => m.Category == category && m.TaxRate.ArchivedAtUtc == null)
+            .FirstOrDefaultAsync(ct);
+
+        return mapping is null ? (null, 0m) : (mapping.TaxRateId, mapping.TaxRate.Rate);
     }
 
     private static async Task<IResult> AddLaborAsync(
@@ -417,18 +578,28 @@ public static class JobEndpoints
         if (job.Status is JobStatus.Closed or JobStatus.Completed or JobStatus.Invoiced)
             return Results.BadRequest(new { code = "validation_error", message = $"Cannot modify a {job.Status} job" });
 
+        var business = await db.Businesses.FindAsync([job.BusinessId], ct);
+        var (rateId, percent) = await ResolveTaxRateAsync(db, job.CustomerId, TaxCategory.Labour, ct);
+        var lineTotal = request.Hours * request.Rate;
+        var taxed = TaxCalculator.CalculateLine(
+            new TaxableLine(lineTotal, percent), business?.PricesIncludeTax ?? false);
+
         var line = new JobLaborLine
         {
             JobId = id,
             Description = request.Description.Trim(),
             Hours = request.Hours,
-            Rate = request.Rate
+            Rate = request.Rate,
+            TaxRateId = rateId,
+            TaxRatePercent = percent,
+            TaxAmount = taxed.Tax
         };
         db.JobLaborLines.Add(line);
         await db.SaveChangesAsync(ct);
 
         return Results.Created($"/api/jobs/{id}/labor/{line.Id}",
-            new LaborLineDto(line.Id, line.Description, line.Hours, line.Rate, line.Hours * line.Rate));
+            new LaborLineDto(line.Id, line.Description, line.Hours, line.Rate, lineTotal,
+                line.TaxRatePercent, line.TaxAmount));
     }
 
     private static async Task<IResult> RemovePartAsync(Guid id, Guid lineId, AppDbContext db, CurrentUserService currentUser, CancellationToken ct)

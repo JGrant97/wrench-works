@@ -1,7 +1,10 @@
 namespace WrenchWorks.Domain.Entities;
 
-public class Vehicle : BusinessScopedEntity
+public class Vehicle : BusinessScopedEntity, IArchivable
 {
+    /// <summary>Null while active; set when archived. See IArchivable.</summary>
+    public DateTime? ArchivedAtUtc { get; set; }
+
     public Guid CustomerId { get; set; }
     public Customer Customer { get; set; } = null!;
 

@@ -12,7 +12,7 @@ namespace WrenchWorks.Api.Features.Customers;
 public record CreateCustomerRequest(string Name, string? Phone, string? Email, string? Address, string? PreferredContactMethod, string? Notes);
 public record UpdateCustomerRequest(string Name, string? Phone, string? Email, string? Address, string? PreferredContactMethod, string? Notes);
 public record CustomerDto(Guid Id, string Name, string? Phone, string? Email, string? Address, string? PreferredContactMethod, string? Notes, int VehicleCount, DateTime CreatedAtUtc);
-public record CustomerDetailDto(Guid Id, string Name, string? Phone, string? Email, string? Address, string? PreferredContactMethod, string? Notes, IEnumerable<CustomerVehicleDto> Vehicles, IEnumerable<CustomerJobDto> RecentJobs, DateTime CreatedAtUtc);
+public record CustomerDetailDto(Guid Id, string Name, string? Phone, string? Email, string? Address, string? PreferredContactMethod, string? Notes, bool IsTaxExempt, string? TaxExemptionReference, IEnumerable<CustomerVehicleDto> Vehicles, IEnumerable<CustomerJobDto> RecentJobs, DateTime CreatedAtUtc);
 public record CustomerVehicleDto(Guid Id, string DisplayName, int? Year, string? Registration, string? ColourName);
 public record CustomerJobDto(Guid Id, string Title, string Status, string? VehicleDisplay, decimal Total, DateTime CreatedAtUtc);
 
@@ -39,6 +39,11 @@ public static class CustomerEndpoints
         group.MapPost("/", CreateAsync).RequireAuthorization("customers.manage");
         group.MapPut("/{id:guid}", UpdateAsync).RequireAuthorization("customers.manage");
         group.MapGet("/search", SearchAsync).RequireAuthorization("customers.view");
+        group.MapDelete("/{id:guid}", DeleteAsync).RequireAuthorization("customers.manage");
+        group.MapPost("/{id:guid}/archive", ArchiveAsync).RequireAuthorization("customers.manage")
+             .Produces<ArchiveResultDto>();
+        group.MapPost("/{id:guid}/unarchive", UnarchiveAsync).RequireAuthorization("customers.manage")
+             .Produces<ArchiveResultDto>();
     }
 
     private static async Task<IResult> ListAsync(
@@ -46,9 +51,13 @@ public static class CustomerEndpoints
         int page = 1,
         int pageSize = 25,
         string? search = null,
+        bool includeArchived = false,
         CancellationToken ct = default)
     {
+        // Archived customers stay out of lists and pickers but remain resolvable by id,
+        // so a historical job still renders the name of the customer it was for.
         var query = db.Customers.AsQueryable();
+        if (!includeArchived) query = query.Where(c => c.ArchivedAtUtc == null);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -97,9 +106,45 @@ public static class CustomerEndpoints
         return Results.Ok(new CustomerDetailDto(
             customer.Id, customer.Name, customer.Phone, customer.Email,
             customer.Address, customer.PreferredContactMethod, customer.Notes,
+            customer.IsTaxExempt, customer.TaxExemptionReference,
             customer.Vehicles.Select(v => new CustomerVehicleDto(v.Id, v.DisplayName ?? "", v.Year, v.Registration, v.Colour != null ? v.Colour.Name : null)),
             recentJobs,
             customer.CreatedAtUtc));
+    }
+
+    private static async Task<IResult> DeleteAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var customer = await db.Customers.FindAsync([id], ct)
+            ?? throw new NotFoundException("Customer not found");
+
+        Archiving.EnsureDeletable("customer",
+            new Dependent("vehicles", await db.Vehicles.CountAsync(v => v.CustomerId == id, ct)),
+            new Dependent("jobs", await db.Jobs.CountAsync(j => j.CustomerId == id, ct)),
+            new Dependent("bookings", await db.Bookings.CountAsync(b => b.CustomerId == id, ct)));
+
+        db.Customers.Remove(customer);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ArchiveAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var customer = await db.Customers.FindAsync([id], ct)
+            ?? throw new NotFoundException("Customer not found");
+
+        var result = Archiving.Archive(customer, id);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> UnarchiveAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var customer = await db.Customers.FindAsync([id], ct)
+            ?? throw new NotFoundException("Customer not found");
+
+        var result = Archiving.Unarchive(customer, id);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> CreateAsync(

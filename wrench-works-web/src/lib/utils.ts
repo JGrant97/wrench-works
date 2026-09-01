@@ -5,9 +5,10 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(amount: number, currency = "GBP") {
-  return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(amount);
-}
+// Moved to lib/currency.ts, which knows the supported set and picks a matching locale.
+// Re-exported so existing imports keep working — but prefer useCurrency() in client
+// components: calling this bare silently formats as GBP regardless of the business.
+export { formatCurrency } from "@/lib/currency";
 
 export function formatDate(date: string | Date, options?: Intl.DateTimeFormatOptions) {
   return new Date(date).toLocaleDateString("en-GB", {

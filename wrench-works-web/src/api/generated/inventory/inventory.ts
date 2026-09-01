@@ -7,6 +7,7 @@
  */
 import type {
   AdjustStockRequest,
+  ArchiveResultDto,
   CreateCategoryRequest,
   CreateItemRequest,
   GetApiInventoryItemsParams,
@@ -76,6 +77,14 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
+  export const deleteApiInventoryItemsId = (
+    id: string,
+ ) => {
+      return apiClient<void>(
+      {url: `/api/inventory/items/${id}`, method: 'DELETE'
+    },
+      );
+    }
   export const postApiInventoryItemsIdAdjust = (
     id: string,
     adjustStockRequest: AdjustStockRequest,
@@ -87,10 +96,29 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
+  export const postApiInventoryItemsIdArchive = (
+    id: string,
+ ) => {
+      return apiClient<ArchiveResultDto>(
+      {url: `/api/inventory/items/${id}/archive`, method: 'POST'
+    },
+      );
+    }
+  export const postApiInventoryItemsIdUnarchive = (
+    id: string,
+ ) => {
+      return apiClient<ArchiveResultDto>(
+      {url: `/api/inventory/items/${id}/unarchive`, method: 'POST'
+    },
+      );
+    }
   export type GetApiInventoryCategoriesResult = NonNullable<Awaited<ReturnType<typeof getApiInventoryCategories>>>
 export type PostApiInventoryCategoriesResult = NonNullable<Awaited<ReturnType<typeof postApiInventoryCategories>>>
 export type GetApiInventoryItemsResult = NonNullable<Awaited<ReturnType<typeof getApiInventoryItems>>>
 export type PostApiInventoryItemsResult = NonNullable<Awaited<ReturnType<typeof postApiInventoryItems>>>
 export type GetApiInventoryItemsIdResult = NonNullable<Awaited<ReturnType<typeof getApiInventoryItemsId>>>
 export type PutApiInventoryItemsIdResult = NonNullable<Awaited<ReturnType<typeof putApiInventoryItemsId>>>
+export type DeleteApiInventoryItemsIdResult = NonNullable<Awaited<ReturnType<typeof deleteApiInventoryItemsId>>>
 export type PostApiInventoryItemsIdAdjustResult = NonNullable<Awaited<ReturnType<typeof postApiInventoryItemsIdAdjust>>>
+export type PostApiInventoryItemsIdArchiveResult = NonNullable<Awaited<ReturnType<typeof postApiInventoryItemsIdArchive>>>
+export type PostApiInventoryItemsIdUnarchiveResult = NonNullable<Awaited<ReturnType<typeof postApiInventoryItemsIdUnarchive>>>

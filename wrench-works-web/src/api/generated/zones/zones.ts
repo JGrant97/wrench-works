@@ -43,6 +43,15 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
+  export const deleteApiZonesId = (
+    id: string,
+ ) => {
+      return apiClient<void>(
+      {url: `/api/zones/${id}`, method: 'DELETE'
+    },
+      );
+    }
   export type GetApiZonesResult = NonNullable<Awaited<ReturnType<typeof getApiZones>>>
 export type PostApiZonesResult = NonNullable<Awaited<ReturnType<typeof postApiZones>>>
 export type PutApiZonesIdResult = NonNullable<Awaited<ReturnType<typeof putApiZonesId>>>
+export type DeleteApiZonesIdResult = NonNullable<Awaited<ReturnType<typeof deleteApiZonesId>>>

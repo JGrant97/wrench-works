@@ -30,6 +30,9 @@ public class AppDbContext : DbContext
     public DbSet<JobLaborLine> JobLaborLines => Set<JobLaborLine>();
     public DbSet<JobPartLine> JobPartLines => Set<JobPartLine>();
     public DbSet<JobAssignment> JobAssignments => Set<JobAssignment>();
+    public DbSet<TaxRate> TaxRates => Set<TaxRate>();
+    public DbSet<TaxRateComponent> TaxRateComponents => Set<TaxRateComponent>();
+    public DbSet<TaxRateCategory> TaxRateCategories => Set<TaxRateCategory>();
     public DbSet<InventoryCategory> InventoryCategories => Set<InventoryCategory>();
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
     public DbSet<StockMovement> StockMovements => Set<StockMovement>();
@@ -56,6 +59,10 @@ public class AppDbContext : DbContext
         // When null (unauthenticated), all records pass through.
         // When set, only matching business records are returned.
         modelBuilder.Entity<Zone>().HasQueryFilter(e => _currentBusinessId == null || e.BusinessId == _currentBusinessId);
+        // Filters are registered one entity at a time, so a new BusinessScopedEntity has NO
+        // isolation until its line exists. TaxRate is one.
+        modelBuilder.Entity<TaxRate>().HasQueryFilter(e => _currentBusinessId == null || e.BusinessId == _currentBusinessId);
+        modelBuilder.Entity<TaxRateCategory>().HasQueryFilter(e => _currentBusinessId == null || e.BusinessId == _currentBusinessId);
         modelBuilder.Entity<Customer>().HasQueryFilter(e => _currentBusinessId == null || e.BusinessId == _currentBusinessId);
         modelBuilder.Entity<Vehicle>().HasQueryFilter(e => _currentBusinessId == null || e.BusinessId == _currentBusinessId);
         modelBuilder.Entity<Booking>().HasQueryFilter(e => _currentBusinessId == null || e.BusinessId == _currentBusinessId);

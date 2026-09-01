@@ -3,10 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useApiQuery } from "@/hooks/use-api";
+import { useCurrency } from "@/hooks/use-currency";
 import { usePermission } from "@/hooks/use-permission";
 import { Button, Badge, Card, PageHeader, Spinner, EmptyState, Input, Select } from "@/components/ui";
 import { ErrorState } from "@/components/data-state";
-import { cn, formatDate, JOB_STATUS_COLORS, formatCurrency , statusLabel} from "@/lib/utils";
+import { cn, formatDate, JOB_STATUS_COLORS, statusLabel } from "@/lib/utils";
 import { Plus, Briefcase, Search } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
@@ -44,6 +45,7 @@ const STATUS_OPTIONS = [
 ];
 
 export default function JobsPage() {
+  const { format } = useCurrency();
   const canCreate = usePermission("jobs.create");
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -124,7 +126,7 @@ export default function JobsPage() {
                     </div>
                     <div className="text-right flex-shrink-0 ml-4">
                       <p className="font-semibold text-surface-900">
-                        {formatCurrency(job.laborTotal + job.partsTotal)}
+                        {format(job.laborTotal + job.partsTotal)}
                       </p>
                       <p className="text-xs text-surface-400">{formatDate(job.createdAtUtc)}</p>
                     </div>

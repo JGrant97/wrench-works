@@ -8,6 +8,8 @@
 import type { LaborLineDtoHours } from './laborLineDtoHours';
 import type { LaborLineDtoRate } from './laborLineDtoRate';
 import type { LaborLineDtoTotal } from './laborLineDtoTotal';
+import type { LaborLineDtoTaxRatePercent } from './laborLineDtoTaxRatePercent';
+import type { LaborLineDtoTaxAmount } from './laborLineDtoTaxAmount';
 
 export interface LaborLineDto {
   id: string;
@@ -18,4 +20,8 @@ export interface LaborLineDto {
   rate: LaborLineDtoRate;
   /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
   total: LaborLineDtoTotal;
+  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
+  taxRatePercent: LaborLineDtoTaxRatePercent;
+  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
+  taxAmount: LaborLineDtoTaxAmount;
 }

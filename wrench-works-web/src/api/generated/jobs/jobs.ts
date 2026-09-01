@@ -8,6 +8,7 @@
 import type {
   AddLaborLineRequest,
   AddPartToJobRequest,
+  ArchiveResultDto,
   CreateJobRequest,
   GetApiJobsParams,
   JobDetailDto,
@@ -55,6 +56,14 @@ import { apiClient } from '../../../lib/api-client';
       {url: `/api/jobs/${id}`, method: 'PUT',
       headers: {'Content-Type': 'application/json', },
       data: updateJobRequest
+    },
+      );
+    }
+  export const deleteApiJobsId = (
+    id: string,
+ ) => {
+      return apiClient<void>(
+      {url: `/api/jobs/${id}`, method: 'DELETE'
     },
       );
     }
@@ -109,12 +118,31 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
+  export const postApiJobsIdArchive = (
+    id: string,
+ ) => {
+      return apiClient<ArchiveResultDto>(
+      {url: `/api/jobs/${id}/archive`, method: 'POST'
+    },
+      );
+    }
+  export const postApiJobsIdUnarchive = (
+    id: string,
+ ) => {
+      return apiClient<ArchiveResultDto>(
+      {url: `/api/jobs/${id}/unarchive`, method: 'POST'
+    },
+      );
+    }
   export type GetApiJobsResult = NonNullable<Awaited<ReturnType<typeof getApiJobs>>>
 export type PostApiJobsResult = NonNullable<Awaited<ReturnType<typeof postApiJobs>>>
 export type GetApiJobsIdResult = NonNullable<Awaited<ReturnType<typeof getApiJobsId>>>
 export type PutApiJobsIdResult = NonNullable<Awaited<ReturnType<typeof putApiJobsId>>>
+export type DeleteApiJobsIdResult = NonNullable<Awaited<ReturnType<typeof deleteApiJobsId>>>
 export type PatchApiJobsIdStatusResult = NonNullable<Awaited<ReturnType<typeof patchApiJobsIdStatus>>>
 export type PostApiJobsIdPartsResult = NonNullable<Awaited<ReturnType<typeof postApiJobsIdParts>>>
 export type PostApiJobsIdLaborResult = NonNullable<Awaited<ReturnType<typeof postApiJobsIdLabor>>>
 export type DeleteApiJobsIdPartsLineIdResult = NonNullable<Awaited<ReturnType<typeof deleteApiJobsIdPartsLineId>>>
 export type DeleteApiJobsIdLaborLineIdResult = NonNullable<Awaited<ReturnType<typeof deleteApiJobsIdLaborLineId>>>
+export type PostApiJobsIdArchiveResult = NonNullable<Awaited<ReturnType<typeof postApiJobsIdArchive>>>
+export type PostApiJobsIdUnarchiveResult = NonNullable<Awaited<ReturnType<typeof postApiJobsIdUnarchive>>>

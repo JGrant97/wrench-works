@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
+using WrenchWorks.Api.Features.Common;
 using WrenchWorks.Api.Middleware;
 using WrenchWorks.Domain.Entities;
 using WrenchWorks.Infrastructure.Persistence;
@@ -41,6 +42,7 @@ public static class ZoneEndpoints
         group.MapGet("/", ListAsync).RequireAuthorization("calendar.view");
         group.MapPost("/", CreateAsync).RequireAuthorization("settings.manage");
         group.MapPut("/{id:guid}", UpdateAsync).RequireAuthorization("settings.manage");
+        group.MapDelete("/{id:guid}", DeleteAsync).RequireAuthorization("settings.manage");
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, CancellationToken ct)
@@ -51,6 +53,26 @@ public static class ZoneEndpoints
             .ToListAsync(ct);
 
         return Results.Ok(zones);
+    }
+
+    /// <summary>
+    /// Zones model retirement with IsActive rather than ArchivedAtUtc, so this is delete
+    /// only: a bay that has never been booked can go, anything else is deactivated via
+    /// PUT. Deleting a used bay would previously have cascaded away every booking ever
+    /// made in it.
+    /// </summary>
+    private static async Task<IResult> DeleteAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var zone = await db.Zones.FindAsync([id], ct)
+            ?? throw new NotFoundException("Zone not found");
+
+        Archiving.EnsureDeletable("zone",
+            new Dependent("bookings", await db.Bookings.CountAsync(b => b.ZoneId == id, ct)),
+            new Dependent("jobs", await db.Jobs.CountAsync(j => j.AssignedZoneId == id, ct)));
+
+        db.Zones.Remove(zone);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
     }
 
     private static async Task<IResult> CreateAsync(

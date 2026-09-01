@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { Button, Modal, Input } from "@/components/ui";
+import { useCurrency } from "@/hooks/use-currency";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 
 export function AddLaborModal({ jobId, onClose, onAdded }: { jobId: string; onClose: () => void; onAdded: () => void }) {
+  const { symbol } = useCurrency();
   const [form, setForm] = useState({ description: "", hours: "", rate: "" });
   const [loading, setLoading] = useState(false);
 
@@ -33,7 +35,7 @@ export function AddLaborModal({ jobId, onClose, onAdded }: { jobId: string; onCl
         <Input id="desc" label="Description" required value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="e.g. Brake pad replacement" />
         <div className="grid grid-cols-2 gap-4">
           <Input id="hours" label="Hours" type="number" step="0.25" min="0" required value={form.hours} onChange={(e) => setForm((f) => ({ ...f, hours: e.target.value }))} />
-          <Input id="rate" label="Rate (£/hr)" type="number" step="0.01" min="0" required value={form.rate} onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))} />
+          <Input id="rate" label={`Rate (${symbol}/hr)`} type="number" step="0.01" min="0" required value={form.rate} onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))} />
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

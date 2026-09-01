@@ -10,11 +10,11 @@ namespace WrenchWorks.Api.Features.Inventory;
 
 // DTOs
 public record CreateCategoryRequest(string Name);
-public record CreateItemRequest(string Name, string? Sku, Guid? CategoryId, decimal UnitCost, decimal? RetailPrice, int StockOnHand, int ReorderThreshold, string? CompatibilityTagsJson);
-public record UpdateItemRequest(string Name, string? Sku, Guid? CategoryId, decimal UnitCost, decimal? RetailPrice, int ReorderThreshold);
+public record CreateItemRequest(string Name, string? Sku, Guid? CategoryId, decimal UnitCost, decimal? RetailPrice, int StockOnHand, int ReorderThreshold, string? CompatibilityTagsJson, bool IsConsumable = false);
+public record UpdateItemRequest(string Name, string? Sku, Guid? CategoryId, decimal UnitCost, decimal? RetailPrice, int ReorderThreshold, bool IsConsumable = false);
 public record AdjustStockRequest(int QuantityDelta, string Reason, string? Notes);
 public record InventoryCategoryDto(Guid Id, string Name, int ItemCount);
-public record InventoryItemDto(Guid Id, string Name, string? Sku, Guid? CategoryId, string? CategoryName, decimal UnitCost, decimal? RetailPrice, int StockOnHand, int ReorderThreshold, bool LowStock, DateTime CreatedAtUtc);
+public record InventoryItemDto(Guid Id, string Name, string? Sku, Guid? CategoryId, string? CategoryName, decimal UnitCost, decimal? RetailPrice, int StockOnHand, int ReorderThreshold, bool LowStock, bool IsConsumable, DateTime CreatedAtUtc);
 
 public class CreateItemValidator : AbstractValidator<CreateItemRequest>
 {
@@ -47,6 +47,11 @@ public static class InventoryEndpoints
         group.MapPost("/items", CreateItemAsync).RequireAuthorization("inventory.manage");
         group.MapPut("/items/{id:guid}", UpdateItemAsync).RequireAuthorization("inventory.manage");
         group.MapPost("/items/{id:guid}/adjust", AdjustStockAsync).RequireAuthorization("inventory.manage");
+        group.MapDelete("/items/{id:guid}", DeleteItemAsync).RequireAuthorization("inventory.manage");
+        group.MapPost("/items/{id:guid}/archive", ArchiveItemAsync).RequireAuthorization("inventory.manage")
+             .Produces<ArchiveResultDto>();
+        group.MapPost("/items/{id:guid}/unarchive", UnarchiveItemAsync).RequireAuthorization("inventory.manage")
+             .Produces<ArchiveResultDto>();
     }
 
     private static async Task<IResult> ListCategoriesAsync(AppDbContext db, CancellationToken ct)
@@ -81,9 +86,12 @@ public static class InventoryEndpoints
         int page = 1, int pageSize = 25,
         string? search = null, Guid? categoryId = null,
         bool? lowStockOnly = null,
+        bool includeArchived = false,
         CancellationToken ct = default)
     {
         var query = db.InventoryItems.Include(i => i.Category).AsQueryable();
+        // A discontinued part stays out of the picker but keeps its movement history.
+        if (!includeArchived) query = query.Where(i => i.ArchivedAtUtc == null);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -97,7 +105,7 @@ public static class InventoryEndpoints
         var items = await query
             .OrderBy(i => i.Name)
             .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(i => new InventoryItemDto(i.Id, i.Name, i.Sku, i.CategoryId, i.Category != null ? i.Category.Name : null, i.UnitCost, i.RetailPrice, i.StockOnHand, i.ReorderThreshold, i.StockOnHand <= i.ReorderThreshold, i.CreatedAtUtc))
+            .Select(i => new InventoryItemDto(i.Id, i.Name, i.Sku, i.CategoryId, i.Category != null ? i.Category.Name : null, i.UnitCost, i.RetailPrice, i.StockOnHand, i.ReorderThreshold, i.StockOnHand <= i.ReorderThreshold, i.IsConsumable, i.CreatedAtUtc))
             .ToListAsync(ct);
 
         return Results.Ok(new PagedResult<InventoryItemDto>(items, total, page, pageSize));
@@ -108,7 +116,39 @@ public static class InventoryEndpoints
         var item = await db.InventoryItems.Include(i => i.Category).FirstOrDefaultAsync(i => i.Id == id, ct)
             ?? throw new NotFoundException("Inventory item not found");
 
-        return Results.Ok(new InventoryItemDto(item.Id, item.Name, item.Sku, item.CategoryId, item.Category?.Name, item.UnitCost, item.RetailPrice, item.StockOnHand, item.ReorderThreshold, item.StockOnHand <= item.ReorderThreshold, item.CreatedAtUtc));
+        return Results.Ok(new InventoryItemDto(item.Id, item.Name, item.Sku, item.CategoryId, item.Category?.Name, item.UnitCost, item.RetailPrice, item.StockOnHand, item.ReorderThreshold, item.StockOnHand <= item.ReorderThreshold, item.IsConsumable, item.CreatedAtUtc));
+    }
+
+    private static async Task<IResult> DeleteItemAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var item = await db.InventoryItems.FindAsync([id], ct)
+            ?? throw new NotFoundException("Item not found");
+
+        Archiving.EnsureDeletable("item",
+            new Dependent("job part lines", await db.JobPartLines.CountAsync(p => p.InventoryItemId == id, ct)),
+            new Dependent("stock movements", await db.StockMovements.CountAsync(m => m.InventoryItemId == id, ct)));
+
+        db.InventoryItems.Remove(item);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ArchiveItemAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var item = await db.InventoryItems.FindAsync([id], ct)
+            ?? throw new NotFoundException("Item not found");
+        var result = Archiving.Archive(item, id);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> UnarchiveItemAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        var item = await db.InventoryItems.FindAsync([id], ct)
+            ?? throw new NotFoundException("Item not found");
+        var result = Archiving.Unarchive(item, id);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(result);
     }
 
     private static async Task<IResult> CreateItemAsync(
@@ -136,6 +176,7 @@ public static class InventoryEndpoints
             UnitCost = request.UnitCost,
             RetailPrice = request.RetailPrice,
             StockOnHand = request.StockOnHand,
+            IsConsumable = request.IsConsumable,
             ReorderThreshold = request.ReorderThreshold,
             CompatibilityTagsJson = request.CompatibilityTagsJson
         };
@@ -179,9 +220,10 @@ public static class InventoryEndpoints
         item.UnitCost = request.UnitCost;
         item.RetailPrice = request.RetailPrice;
         item.ReorderThreshold = request.ReorderThreshold;
+        item.IsConsumable = request.IsConsumable;
 
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new InventoryItemDto(item.Id, item.Name, item.Sku, item.CategoryId, null, item.UnitCost, item.RetailPrice, item.StockOnHand, item.ReorderThreshold, item.StockOnHand <= item.ReorderThreshold, item.CreatedAtUtc));
+        return Results.Ok(new InventoryItemDto(item.Id, item.Name, item.Sku, item.CategoryId, null, item.UnitCost, item.RetailPrice, item.StockOnHand, item.ReorderThreshold, item.StockOnHand <= item.ReorderThreshold, item.IsConsumable, item.CreatedAtUtc));
     }
 
     private static async Task<IResult> AdjustStockAsync(

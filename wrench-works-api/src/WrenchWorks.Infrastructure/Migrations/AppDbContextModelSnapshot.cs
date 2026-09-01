@@ -170,11 +170,25 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Property<string>("Phone")
                         .HasColumnType("text");
 
+                    b.Property<bool>("PricesIncludeTax")
+                        .HasColumnType("boolean");
+
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
+
+                    b.Property<string>("TaxLabel")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("Tax");
+
+                    b.Property<string>("TaxRegistrationNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<string>("Timezone")
                         .IsRequired()
@@ -313,6 +327,9 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Property<string>("Address")
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("ArchivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("BusinessId")
                         .HasColumnType("uuid");
 
@@ -322,6 +339,9 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Property<string>("Email")
                         .HasMaxLength(320)
                         .HasColumnType("character varying(320)");
+
+                    b.Property<bool>("IsTaxExempt")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -344,10 +364,16 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Property<string>("Tags")
                         .HasColumnType("text");
 
+                    b.Property<string>("TaxExemptionReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BusinessId", "ArchivedAtUtc");
 
                     b.HasIndex("BusinessId", "Email");
 
@@ -390,6 +416,9 @@ namespace WrenchWorks.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("ArchivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("BusinessId")
                         .HasColumnType("uuid");
 
@@ -401,6 +430,9 @@ namespace WrenchWorks.Infrastructure.Migrations
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsConsumable")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -450,6 +482,9 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ArchivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("AssignedZoneId")
                         .HasColumnType("uuid");
@@ -561,6 +596,17 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Property<long>("RowVersion")
                         .HasColumnType("bigint");
 
+                    b.Property<decimal>("TaxAmount")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<Guid?>("TaxRateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("TaxRatePercent")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -592,6 +638,17 @@ namespace WrenchWorks.Infrastructure.Migrations
 
                     b.Property<long>("RowVersion")
                         .HasColumnType("bigint");
+
+                    b.Property<decimal>("TaxAmount")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<Guid?>("TaxRateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("TaxRatePercent")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
 
                     b.Property<decimal>("UnitPrice")
                         .HasPrecision(10, 2)
@@ -848,6 +905,119 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.ToTable("StockMovements");
                 });
 
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.TaxRate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ArchivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("BusinessId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessId", "ArchivedAtUtc");
+
+                    b.ToTable("TaxRates");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.TaxRateCategory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BusinessId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("TaxRateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaxRateId");
+
+                    b.HasIndex("BusinessId", "Category")
+                        .IsUnique();
+
+                    b.ToTable("TaxRateCategories");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.TaxRateComponent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("numeric(9,6)");
+
+                    b.Property<long>("RowVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TaxRateId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaxRateId");
+
+                    b.ToTable("TaxRateComponents");
+                });
+
             modelBuilder.Entity("WrenchWorks.Domain.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -913,6 +1083,9 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ArchivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("BusinessId")
                         .HasColumnType("uuid");
@@ -1208,7 +1381,7 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.HasOne("WrenchWorks.Domain.Entities.Customer", "Customer")
                         .WithMany("Bookings")
                         .HasForeignKey("CustomerId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("WrenchWorks.Domain.Entities.Job", "Job")
@@ -1218,13 +1391,13 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.HasOne("WrenchWorks.Domain.Entities.Vehicle", "Vehicle")
                         .WithMany()
                         .HasForeignKey("VehicleId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("WrenchWorks.Domain.Entities.Zone", "Zone")
                         .WithMany("Bookings")
                         .HasForeignKey("ZoneId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Business");
@@ -1334,13 +1507,13 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.HasOne("WrenchWorks.Domain.Entities.Customer", "Customer")
                         .WithMany("Jobs")
                         .HasForeignKey("CustomerId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("WrenchWorks.Domain.Entities.Vehicle", "Vehicle")
                         .WithMany("Jobs")
                         .HasForeignKey("VehicleId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("AssignedZone");
@@ -1389,7 +1562,7 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.HasOne("WrenchWorks.Domain.Entities.InventoryItem", "InventoryItem")
                         .WithMany("JobPartLines")
                         .HasForeignKey("InventoryItemId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("WrenchWorks.Domain.Entities.Job", "Job")
@@ -1484,7 +1657,7 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.HasOne("WrenchWorks.Domain.Entities.InventoryItem", "InventoryItem")
                         .WithMany("StockMovements")
                         .HasForeignKey("InventoryItemId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("WrenchWorks.Domain.Entities.Job", "Job")
@@ -1496,6 +1669,47 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Navigation("InventoryItem");
 
                     b.Navigation("Job");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.TaxRate", b =>
+                {
+                    b.HasOne("WrenchWorks.Domain.Entities.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.TaxRateCategory", b =>
+                {
+                    b.HasOne("WrenchWorks.Domain.Entities.Business", "Business")
+                        .WithMany()
+                        .HasForeignKey("BusinessId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("WrenchWorks.Domain.Entities.TaxRate", "TaxRate")
+                        .WithMany("Categories")
+                        .HasForeignKey("TaxRateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Business");
+
+                    b.Navigation("TaxRate");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.TaxRateComponent", b =>
+                {
+                    b.HasOne("WrenchWorks.Domain.Entities.TaxRate", "TaxRate")
+                        .WithMany("Components")
+                        .HasForeignKey("TaxRateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("TaxRate");
                 });
 
             modelBuilder.Entity("WrenchWorks.Domain.Entities.Vehicle", b =>
@@ -1514,7 +1728,7 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.HasOne("WrenchWorks.Domain.Entities.Customer", "Customer")
                         .WithMany("Vehicles")
                         .HasForeignKey("CustomerId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("WrenchWorks.Domain.Entities.VehicleVariant", "Variant")
@@ -1628,6 +1842,13 @@ namespace WrenchWorks.Infrastructure.Migrations
                     b.Navigation("Permissions");
 
                     b.Navigation("UserRoles");
+                });
+
+            modelBuilder.Entity("WrenchWorks.Domain.Entities.TaxRate", b =>
+                {
+                    b.Navigation("Categories");
+
+                    b.Navigation("Components");
                 });
 
             modelBuilder.Entity("WrenchWorks.Domain.Entities.User", b =>

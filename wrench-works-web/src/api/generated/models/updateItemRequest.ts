@@ -21,4 +21,5 @@ export interface UpdateItemRequest {
   retailPrice: UpdateItemRequestRetailPrice;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   reorderThreshold: UpdateItemRequestReorderThreshold;
+  isConsumable?: boolean;
 }

@@ -9,6 +9,8 @@ import type { PartLineDtoSku } from './partLineDtoSku';
 import type { PartLineDtoQuantity } from './partLineDtoQuantity';
 import type { PartLineDtoUnitPrice } from './partLineDtoUnitPrice';
 import type { PartLineDtoTotal } from './partLineDtoTotal';
+import type { PartLineDtoTaxRatePercent } from './partLineDtoTaxRatePercent';
+import type { PartLineDtoTaxAmount } from './partLineDtoTaxAmount';
 
 export interface PartLineDto {
   id: string;
@@ -21,4 +23,8 @@ export interface PartLineDto {
   unitPrice: PartLineDtoUnitPrice;
   /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
   total: PartLineDtoTotal;
+  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
+  taxRatePercent: PartLineDtoTaxRatePercent;
+  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
+  taxAmount: PartLineDtoTaxAmount;
 }

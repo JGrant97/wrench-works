@@ -6,7 +6,14 @@
  * ValidTransitions in JobEndpoints.cs — if one changes, so must the other, and it is
  * easier to notice that when it is not buried in a render tree.
  */
-export interface LaborLine {
+/** Tax as charged on this line. See docs/tax.md — the rate is snapshotted, not looked up. */
+interface TaxedLine {
+  /** A fraction: 0.2 is 20%. Zero means the line was not taxed. */
+  taxRatePercent: number;
+  taxAmount: number;
+}
+
+export interface LaborLine extends TaxedLine {
   id: string;
   description: string;
   hours: number;
@@ -14,7 +21,7 @@ export interface LaborLine {
   total: number;
 }
 
-export interface PartLine {
+export interface PartLine extends TaxedLine {
   id: string;
   inventoryItemId: string;
   itemName: string;
@@ -43,6 +50,26 @@ export interface JobDetail {
   laborTotal: number;
   partsTotal: number;
   grandTotal: number;
+  // Net of tax. With tax-inclusive pricing the labour/parts totals already contain tax,
+  // which is why the server states subTotal rather than leaving it to be derived.
+  subTotal: number;
+  taxTotal: number;
+  taxLabel: string;
+  pricesIncludeTax: boolean;
+  customerIsTaxExempt: boolean;
+  taxBreakdown: TaxLine[];
+}
+
+export interface TaxComponentLine {
+  name: string;
+  ratePercent: number;
+}
+
+export interface TaxLine {
+  name: string;
+  ratePercent: number;
+  amount: number;
+  components: TaxComponentLine[];
 }
 
 export const STATUS_TRANSITIONS: Record<string, { value: string; label: string }[]> = {

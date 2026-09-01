@@ -11,11 +11,12 @@ They are separate solutions/packages — always `cd` into the right one before r
 
 ### Companion docs — imported, always in context
 
-The four files below are **imported** at the end of this file, so their full contents load with it every session. You do not need to open them, and you should not re-derive what they already record. They are project memory, not reference reading:
+The five files below are **imported** at the end of this file, so their full contents load with it every session. You do not need to open them, and you should not re-derive what they already record. They are project memory, not reference reading:
 
 - **[docs/app-flow.md](docs/app-flow.md)** — how a request travels from a component to the database, the auth/session lifecycle, the permission vs. feature split, the domain model, a screen-by-screen map, and every bug found by actually running the app (fixed and open).
 - **[docs/bookings-crud.md](docs/bookings-crud.md)** — the state of booking CRUD, what's missing, verified behaviour of conflict detection and the timezone handling, and a proposed build order.
 - **[docs/vehicle-catalogue.md](docs/vehicle-catalogue.md)** — designed, not built: replacing free-text vehicle entry with a make → model → year → variant cascade, plus what NHTSA vPIC actually does and doesn't provide (measured, not assumed).
+- **[docs/tax.md](docs/tax.md)** — charging tax across VAT and US sales-tax regimes without becoming a compliance engine: why rates are configured rather than shipped, why tax lives on the line and not the job, the rounding rule, and what is deliberately not built.
 - **[docs/review-findings.md](docs/review-findings.md)** — the triaged output of a six-reviewer pass over both projects (31 Aug 2026): what breaks today, what silently corrupts data, what is latent, each marked *Verified* or *Reported*, plus what was checked and found clean.
 
 Because they are always loaded, keeping them accurate is not optional — see "Keeping this file and the companion docs current" at the end of this file. A stale line in an imported doc is a wrong fact in every future session.
@@ -198,6 +199,27 @@ Not every entity is tenant-scoped: `Business` and `User` are global by design, a
 
 These exception types are declared in `Middleware/ErrorHandlingMiddleware.cs`. Reuse them rather than returning ad-hoc `Results.BadRequest(new { ... })` — a few older handlers still do that, and it produces an inconsistent client contract.
 
+**Delete removes a row only when nothing references it; everything else archives.** Decided 31 Aug 2026. `IArchivable` (`Domain/Entities/BaseEntity.cs`) adds `ArchivedAtUtc` to `Customer`, `Vehicle`, `Job` and `InventoryItem`; `Zone` keeps its existing `IsActive` instead. `Features/Common/Archiving.cs` holds the rule: `EnsureDeletable` counts dependents and throws a 409 naming them ("This customer has 1 vehicle, 9 jobs, 10 bookings…"), and the UI offers archiving in the same dialog (`components/record-actions.tsx`).
+
+Two things to preserve when adding a delete endpoint anywhere else:
+
+- **Archived rows are excluded by list endpoints, NOT by the global query filter.** Filtering them globally would blank the customer name on a historical job — the exact loss archiving exists to prevent. Lists take `?includeArchived=true`; detail and history lookups always resolve.
+- **The FKs are `Restrict` now and must stay that way.** Eight were `Cascade` (finding 9), so a delete written without a dependency check would not have errored — it would have returned 204 and destroyed the customer's history. `Business → *` stays `Cascade` so tenant offboarding still works, as do job → line-items and make → model → variant, which are genuinely owned children.
+
+**Currency is a business setting, and every amount follows it.** GBP, USD and EUR, chosen on `/settings/general`. The vocabulary is closed and enforced server-side by `SupportedCurrencies` in `Features/Business/BusinessEndpoints.cs` — the dropdown is not the guard, since a request need not come from the dropdown.
+
+The code travels in the readable `ww_user` cookie next to permissions and features, which is what lets client and server components format identically without either doing an extra fetch:
+
+- **Client components:** `useCurrency()` (`hooks/use-currency.ts`) → `{ currency, symbol, format }`. Use `format(total)`, not a bare `formatCurrency(total)` — the bare call falls back to GBP regardless of the business, which is the bug this replaced.
+- **Server components:** `getCurrency()` (`lib/currency-server.ts`), then `formatCurrency(amount, currency)`. Separate file because it imports `next/headers`, which cannot be pulled into a client bundle.
+- **Symbols in labels** ("Rate (£/hr)") come from `symbol`, not a literal.
+
+There is deliberately **no module-level "current currency"**. Server components share module scope across requests, so a mutable would let one tenant's currency bleed into another tenant's render — the same class of leak the query filters exist to prevent.
+
+Changing the setting calls `POST /api/auth/refresh` and reloads, because the cookie is what every page reads; without that the change would not appear until the 24h expiry. Guarded by `BusinessTests`.
+
+**The billing page's plan prices stay hard-coded in £.** Those are what *you* charge the workshop for the SaaS, not the workshop's own money — rendering "€29/mo" for a price you bill in pounds would be a lie. Do not "fix" them to follow this setting.
+
 **Times are UTC.** Fields are named `...Utc` (`ScheduledStartUtc`, `CreatedAtUtc`); keep that convention and convert for display only in the UI.
 
 **`Business.Timezone` is stored but never used.** It's editable on `/settings/general` and nothing reads it — every date renders in the *browser's* timezone. Verified: a booking entered as 09:00 on a UTC-5 machine stores as `14:00Z`, so a business configured as `UTC` sees a different time than the person who booked it. Self-consistent within one browser, wrong across two. Settle this before adding more write paths — see [docs/bookings-crud.md](docs/bookings-crud.md).
@@ -242,6 +264,14 @@ The job line-item endpoints load lines from those unfiltered sets and rely on a 
 **`RemovePartAsync` null-handling bug.** It does `db.Jobs.FindAsync([id], ct)!` then dereferences `job!.Status`. A missing or filtered-out job gives a `NullReferenceException` → `500 internal_error` instead of a 404. `RemoveLaborAsync` two methods below handles the same case correctly with `?? throw new NotFoundException(...)`.
 
 **Known-vulnerable packages.** The build reports `NU1903` high-severity advisories for `Microsoft.OpenApi` 2.0.0-preview.11 and `Microsoft.Build.Tasks.Core` 17.7.2. Also `NU1603`: `Infrastructure` asks for EF Core `10.0.0-preview.3.25171.7`, which does not exist on the feed, so NuGet silently resolves `preview.4.25258.110` instead — the pinned versions are not the versions you get.
+
+**A rate stored as a fraction needs two more decimal places than the percentage.** `TaxRate.Rate` was first declared `decimal(6,4)` on the reasoning that 8.875% needs four places. As a *fraction* that is `0.08875` — five. Postgres silently rounded it to `0.0888` and every US total came out 5p per £1000 wrong. It is `decimal(9,6)` now. Caught only because `TaxTests` asserted an exact figure; a test checking "tax is greater than zero" would have passed. Applies to any rate-like column.
+
+**`static readonly T[]` + `.Contains()` blows up inside a LINQ query.** On .NET 10 the compiler binds an array's `.Contains()` to `MemoryExtensions.Contains(ReadOnlySpan<T>, T)`, which EF Core cannot evaluate as a query parameter — it throws `GenericArguments[1] ... violates the constraint of type parameter 'TRet'` from deep inside the expression funcletizer, and `ErrorHandlingMiddleware` masks it as a bare `500 internal_error`. Declare the set as `List<T>` instead: that binds `Enumerable.Contains` and translates to SQL `IN`. Cost an hour on `DashboardEndpoints`; caught only because `DashboardTests` existed. Related: `GroupBy(x => x.Status).Select(g => g.Key.ToString())` does not translate either — group to the enum, name it in memory.
+
+**The generated client types every number as `number | string`.** The .NET 10 preview OpenAPI generator emits numeric DTO fields with a string validation `pattern`, so Orval widens them. Any page using `@/api/generated/*` has to coerce at the boundary — `dashboard/page.tsx` has a `num()` helper for exactly this. Verified 31 Aug 2026: `decimal RevenueThisMonth` generated as `DashboardDtoRevenueThisMonth = number | string`.
+
+**The same OpenAPI generator also chokes on tuple-typed generics in doc comments** — `IEnumerable<(bool, bool, decimal)>` carrying a `<summary>` emits `IEnumerable` with no type argument and fails `CS0305`. Same fix: plain `//`.
 
 **XML doc comments break the build on `Task`-returning helpers.** The .NET 10 preview OpenAPI XML-comment source generator emits `System.Void` for a `Task`-returning (void) method carrying a `<summary>`, failing with `CS0673: System.Void cannot be used from C#` in generated code you never wrote. Use a plain `//` comment on those; `Task<IResult>` and non-async methods are fine. Two helpers in `CalendarEndpoints`/`VehicleEndpoints` carry a note explaining why.
 
@@ -291,7 +321,7 @@ The whole Catalogue slice followed on 31 Aug 2026 — all six `GET /api/catalogu
 
 ## Keeping this file and the companion docs current
 
-**These five files are the project's memory.** `CLAUDE.md`, `docs/app-flow.md`, `docs/bookings-crud.md`, `docs/vehicle-catalogue.md` and `docs/review-findings.md` record things the source cannot tell you: behaviour verified by running the app, decisions and their reasons, traps that cost someone an hour, and questions still open. A stale entry here is worse than no entry — it produces confident, wrong work.
+**These six files are the project's memory.** `CLAUDE.md`, `docs/app-flow.md`, `docs/bookings-crud.md`, `docs/vehicle-catalogue.md`, `docs/review-findings.md` and `docs/tax.md` record things the source cannot tell you: behaviour verified by running the app, decisions and their reasons, traps that cost someone an hour, and questions still open. A stale entry here is worse than no entry — it produces confident, wrong work.
 
 Updating them is part of finishing a task, not an optional extra. Do it in the same turn as the change.
 
@@ -332,4 +362,5 @@ The files below are loaded in full with this one. Treat their contents as part o
 @docs/app-flow.md
 @docs/bookings-crud.md
 @docs/vehicle-catalogue.md
+@docs/tax.md
 @docs/review-findings.md

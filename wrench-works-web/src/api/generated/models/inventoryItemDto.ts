@@ -28,5 +28,6 @@ export interface InventoryItemDto {
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   reorderThreshold: InventoryItemDtoReorderThreshold;
   lowStock: boolean;
+  isConsumable: boolean;
   createdAtUtc: string;
 }

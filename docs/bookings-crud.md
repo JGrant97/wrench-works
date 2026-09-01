@@ -10,9 +10,21 @@ Exploration only; nothing here is implemented yet. Verified against the running 
 > its times instead of saying "Booking conflicts detected". `/move` shares its conflict
 > check and job cascade with the new update via `CascadeToJobAsync`, so they cannot drift.
 >
-> **Still not built:** drag-to-move and resize on the grid (`/move` remains uncalled and
-> therefore still never executed), `GET /bookings/{id}` for deep-linking, and the
-> booking-conflict test suite described below. The state table is left as written so the
+> **Update, 31 Aug 2026 — drag-to-move is built.** `PUT /bookings/{id}/move` is finally
+> called, by `_lib/use-drag-to-move.ts` driving the week grid. Pointer events rather than
+> HTML5 drag (the grid is positioned by time, so the drop has to be read as pixels and
+> converted back to minutes), snapped to 15 minutes, moving across days via a `data-day`
+> attribute read at drop time. A 4px threshold keeps a click opening the booking rather
+> than rescheduling it by a pixel. Not optimistic: the server can reject the drop as a
+> double-booking, and a block that lands then jumps back is worse than one that waits.
+>
+> *Verified in the browser*, 31 Aug 2026: dragging the "Test" booking from Monday to
+> Wednesday issued `PUT /move` → 200 and the grid re-rendered from the server on the new
+> day. An earlier drag onto an occupied slot returned **409** and the block stayed put —
+> so both the happy path and the conflict path are exercised.
+>
+> **Still not built:** resize handles on a block, `GET /bookings/{id}` for deep-linking,
+> and the booking-conflict test suite described below. The state table is left as written so the
 > reasoning behind the design survives; treat the note above as current.
 >
 > **Known defects in what was built** (31 Aug 2026, from the review pass — full detail in

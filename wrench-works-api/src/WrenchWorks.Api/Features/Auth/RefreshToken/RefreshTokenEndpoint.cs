@@ -70,6 +70,9 @@ public static class RefreshTokenEndpoint
                 email = businessUser.User.Email,
                 businessId = businessUser.BusinessId,
                 businessName = businessUser.Business.Name,
+                // Refresh is how a currency change reaches the session without a re-login:
+                // the settings page calls it after saving.
+                currency = businessUser.Business.Currency,
                 permissions,
                 features
             }

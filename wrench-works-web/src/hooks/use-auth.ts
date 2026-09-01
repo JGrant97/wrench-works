@@ -11,6 +11,8 @@ export interface AuthUser {
   email: string;
   businessId: string;
   businessName: string;
+  /** The business's display currency, from /settings/general. See lib/currency.ts. */
+  currency?: string;
   permissions: string[];
   features: string[];
 }

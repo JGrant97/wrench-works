@@ -5,15 +5,23 @@ import { format, endOfWeek, addDays, isSameDay, differenceInMinutes, startOfDay,
 import { cn, formatTime } from "@/lib/utils";
 import { isMultiDay, assignLanes, getMultiDaySpan, DAY_START, TOTAL_HRS, HR_PX, GRID_H, HOURS, SCROLL_TO_HOUR } from "../_lib/booking";
 import type { Booking, Zone } from "../_lib/booking";
+import { useDragToMove } from "../_lib/use-drag-to-move";
 
 export function WeekView({
-  bookings, zones, weekStart, onSelectBooking,
+  bookings, zones, weekStart, onSelectBooking, onMoveBooking, canEdit = false,
 }: {
   bookings: Booking[];
   zones: Zone[];
   weekStart: Date;
   onSelectBooking: (b: Booking) => void;
+  /** Omitted, or canEdit false, leaves the grid read-only. */
+  onMoveBooking?: (b: Booking, startUtc: string, endUtc: string) => void;
+  canEdit?: boolean;
 }) {
+  const { drag, beginDrag } = useDragToMove({
+    enabled: canEdit && Boolean(onMoveBooking),
+    onMove: (b, startUtc, endUtc) => onMoveBooking?.(b, startUtc, endUtc),
+  });
   const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const today = new Date();
@@ -121,7 +129,11 @@ export function WeekView({
             const laned = assignLanes(dayBookings);
 
             return (
-              <div key={day.toISOString()} className={cn("relative border-r border-surface-200 last:border-r-0", isToday && "bg-brand-50/20 dark:bg-brand-950/10")}>
+              <div
+                key={day.toISOString()}
+                data-day={day.toISOString()}
+                className={cn("relative border-r border-surface-200 last:border-r-0", isToday && "bg-brand-50/20 dark:bg-brand-950/10")}
+              >
                 {/* Grid lines */}
                 {HOURS.map((h) => (
                   <Fragment key={h}>
@@ -155,13 +167,26 @@ export function WeekView({
                   const widthPct = 100 / totalLanes;
                   const leftPct = lane * widthPct;
 
+                  const dragging = drag?.bookingId === booking.id && drag.active;
+                  const dragOffset = dragging ? drag.deltaY : 0;
+
                   return (
                     <button
                       key={booking.id}
-                      onClick={() => onSelectBooking(booking)}
-                      className="absolute z-10 rounded-md px-1.5 py-1 text-left overflow-hidden transition-all hover:brightness-95 hover:shadow-md"
+                      onPointerDown={(e) => beginDrag(booking, e)}
+                      onClick={() => {
+                        // A completed drag ends with drag still set for this render; opening
+                        // the modal here would fight the reschedule the user just made.
+                        if (dragging) return;
+                        onSelectBooking(booking);
+                      }}
+                      className={cn(
+                        "absolute z-10 rounded-md px-1.5 py-1 text-left overflow-hidden hover:brightness-95 hover:shadow-md",
+                        canEdit && "cursor-grab",
+                        dragging ? "z-30 cursor-grabbing shadow-lg opacity-90" : "transition-all"
+                      )}
                       style={{
-                        top,
+                        top: top + dragOffset,
                         height,
                         left: `calc(${leftPct}% + 2px)`,
                         width: `calc(${widthPct}% - 4px)`,

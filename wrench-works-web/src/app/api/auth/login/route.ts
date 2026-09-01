@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
       email: string;
       businessId: string;
       businessName: string;
+      currency: string;
       permissions: string[];
     };
   }>("/api/auth/login", {

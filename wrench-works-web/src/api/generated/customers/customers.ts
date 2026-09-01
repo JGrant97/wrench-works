@@ -6,6 +6,7 @@
  * OpenAPI spec version: v1
  */
 import type {
+  ArchiveResultDto,
   CreateCustomerRequest,
   CustomerDetailDto,
   GetApiCustomersParams,
@@ -56,6 +57,14 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
+  export const deleteApiCustomersId = (
+    id: string,
+ ) => {
+      return apiClient<void>(
+      {url: `/api/customers/${id}`, method: 'DELETE'
+    },
+      );
+    }
   export const getApiCustomersSearch = (
     params: GetApiCustomersSearchParams,
  ) => {
@@ -65,8 +74,27 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
+  export const postApiCustomersIdArchive = (
+    id: string,
+ ) => {
+      return apiClient<ArchiveResultDto>(
+      {url: `/api/customers/${id}/archive`, method: 'POST'
+    },
+      );
+    }
+  export const postApiCustomersIdUnarchive = (
+    id: string,
+ ) => {
+      return apiClient<ArchiveResultDto>(
+      {url: `/api/customers/${id}/unarchive`, method: 'POST'
+    },
+      );
+    }
   export type GetApiCustomersResult = NonNullable<Awaited<ReturnType<typeof getApiCustomers>>>
 export type PostApiCustomersResult = NonNullable<Awaited<ReturnType<typeof postApiCustomers>>>
 export type GetApiCustomersIdResult = NonNullable<Awaited<ReturnType<typeof getApiCustomersId>>>
 export type PutApiCustomersIdResult = NonNullable<Awaited<ReturnType<typeof putApiCustomersId>>>
+export type DeleteApiCustomersIdResult = NonNullable<Awaited<ReturnType<typeof deleteApiCustomersId>>>
 export type GetApiCustomersSearchResult = NonNullable<Awaited<ReturnType<typeof getApiCustomersSearch>>>
+export type PostApiCustomersIdArchiveResult = NonNullable<Awaited<ReturnType<typeof postApiCustomersIdArchive>>>
+export type PostApiCustomersIdUnarchiveResult = NonNullable<Awaited<ReturnType<typeof postApiCustomersIdUnarchive>>>

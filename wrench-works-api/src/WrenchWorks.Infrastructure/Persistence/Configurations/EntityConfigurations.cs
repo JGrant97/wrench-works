@@ -12,6 +12,8 @@ public class BusinessConfiguration : IEntityTypeConfiguration<Business>
         builder.Property(e => e.Name).HasMaxLength(200).IsRequired();
         builder.Property(e => e.Timezone).HasMaxLength(100).HasDefaultValue("UTC");
         builder.Property(e => e.Currency).HasMaxLength(10).HasDefaultValue("GBP");
+        builder.Property(e => e.TaxRegistrationNumber).HasMaxLength(50);
+        builder.Property(e => e.TaxLabel).HasMaxLength(30).HasDefaultValue("Tax");
         builder.Property(e => e.RowVersion).IsRowVersion();
     }
 }
@@ -102,9 +104,11 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.Property(e => e.Name).HasMaxLength(200).IsRequired();
         builder.Property(e => e.Email).HasMaxLength(320);
         builder.Property(e => e.Phone).HasMaxLength(50);
+        builder.Property(e => e.TaxExemptionReference).HasMaxLength(100);
         builder.HasIndex(e => new { e.BusinessId, e.Phone });
         builder.HasIndex(e => new { e.BusinessId, e.Email });
         builder.HasOne(e => e.Business).WithMany(b => b.Customers).HasForeignKey(e => e.BusinessId);
+        builder.HasIndex(e => new { e.BusinessId, e.ArchivedAtUtc });
     }
 }
 
@@ -117,7 +121,11 @@ public class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
         builder.Property(e => e.Vin).HasMaxLength(17);
         builder.Property(e => e.DisplayName).HasMaxLength(300);
         builder.HasIndex(e => new { e.BusinessId, e.Registration });
-        builder.HasOne(e => e.Customer).WithMany(c => c.Vehicles).HasForeignKey(e => e.CustomerId);
+        // Restrict, not Cascade: deleting a customer must never silently take their
+        // vehicles (and through them their whole service history) with it. The delete
+        // endpoint refuses and offers archiving instead. See docs/review-findings.md #9.
+        builder.HasOne(e => e.Customer).WithMany(c => c.Vehicles).HasForeignKey(e => e.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(e => e.Business).WithMany().HasForeignKey(e => e.BusinessId);
 
         // Catalogue links. Restrict: a variant that vehicles reference must not be deletable.
@@ -189,9 +197,13 @@ public class BookingConfiguration : IEntityTypeConfiguration<Booking>
     {
         builder.HasKey(e => e.Id);
         builder.Property(e => e.Title).HasMaxLength(300).IsRequired();
-        builder.HasOne(e => e.Zone).WithMany(z => z.Bookings).HasForeignKey(e => e.ZoneId);
-        builder.HasOne(e => e.Customer).WithMany(c => c.Bookings).HasForeignKey(e => e.CustomerId);
-        builder.HasOne(e => e.Vehicle).WithMany().HasForeignKey(e => e.VehicleId);
+        // Deleting a bay used to delete every booking ever made in it.
+        builder.HasOne(e => e.Zone).WithMany(z => z.Bookings).HasForeignKey(e => e.ZoneId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(e => e.Customer).WithMany(c => c.Bookings).HasForeignKey(e => e.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(e => e.Vehicle).WithMany().HasForeignKey(e => e.VehicleId)
+            .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(e => e.Job).WithMany().HasForeignKey(e => e.JobId).IsRequired(false);
         builder.HasOne(e => e.Business).WithMany().HasForeignKey(e => e.BusinessId);
         builder.HasIndex(e => new { e.BusinessId, e.ZoneId, e.StartUtc, e.EndUtc });
@@ -205,8 +217,10 @@ public class JobConfiguration : IEntityTypeConfiguration<Job>
     {
         builder.HasKey(e => e.Id);
         builder.Property(e => e.Title).HasMaxLength(500).IsRequired();
-        builder.HasOne(e => e.Customer).WithMany(c => c.Jobs).HasForeignKey(e => e.CustomerId);
-        builder.HasOne(e => e.Vehicle).WithMany(v => v.Jobs).HasForeignKey(e => e.VehicleId);
+        builder.HasOne(e => e.Customer).WithMany(c => c.Jobs).HasForeignKey(e => e.CustomerId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(e => e.Vehicle).WithMany(v => v.Jobs).HasForeignKey(e => e.VehicleId)
+            .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(e => e.Booking).WithMany().HasForeignKey(e => e.BookingId).IsRequired(false);
         builder.HasOne(e => e.AssignedZone).WithMany().HasForeignKey(e => e.AssignedZoneId).IsRequired(false);
         builder.HasOne(e => e.Business).WithMany().HasForeignKey(e => e.BusinessId);
@@ -231,6 +245,8 @@ public class JobLaborLineConfiguration : IEntityTypeConfiguration<JobLaborLine>
     {
         builder.HasKey(e => e.Id);
         builder.Property(e => e.Hours).HasPrecision(10, 2);
+        builder.Property(e => e.TaxRatePercent).HasPrecision(9, 6);
+        builder.Property(e => e.TaxAmount).HasPrecision(10, 2);
         builder.Property(e => e.Rate).HasPrecision(10, 2);
         builder.HasOne(e => e.Job).WithMany(j => j.LaborLines).HasForeignKey(e => e.JobId);
     }
@@ -242,9 +258,14 @@ public class JobPartLineConfiguration : IEntityTypeConfiguration<JobPartLine>
     {
         builder.HasKey(e => e.Id);
         builder.Property(e => e.Quantity).HasPrecision(10, 2);
+        builder.Property(e => e.TaxRatePercent).HasPrecision(9, 6);
+        builder.Property(e => e.TaxAmount).HasPrecision(10, 2);
         builder.Property(e => e.UnitPrice).HasPrecision(10, 2);
         builder.HasOne(e => e.Job).WithMany(j => j.PartLines).HasForeignKey(e => e.JobId);
-        builder.HasOne(e => e.InventoryItem).WithMany(i => i.JobPartLines).HasForeignKey(e => e.InventoryItemId);
+        // Deleting a part used to delete every historical job line that billed it —
+        // silently rewriting what customers were charged.
+        builder.HasOne(e => e.InventoryItem).WithMany(i => i.JobPartLines).HasForeignKey(e => e.InventoryItemId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -283,12 +304,64 @@ public class InventoryItemConfiguration : IEntityTypeConfiguration<InventoryItem
     }
 }
 
+public class TaxRateConfiguration : IEntityTypeConfiguration<TaxRate>
+{
+    public void Configure(EntityTypeBuilder<TaxRate> builder)
+    {
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Name).HasMaxLength(100).IsRequired();
+        // (9,6): the rate is stored as a FRACTION, so 8.875% is 0.08875 — five decimal
+        // places, not four. (6,4) silently rounded it to 0.0888 and overcharged.
+        builder.Property(e => e.Rate).HasPrecision(9, 6);
+        builder.HasIndex(e => new { e.BusinessId, e.ArchivedAtUtc });
+        builder.HasOne(e => e.Business).WithMany().HasForeignKey(e => e.BusinessId);
+        builder.Property(e => e.RowVersion).IsRowVersion();
+    }
+}
+
+public class TaxRateCategoryConfiguration : IEntityTypeConfiguration<TaxRateCategory>
+{
+    public void Configure(EntityTypeBuilder<TaxRateCategory> builder)
+    {
+        builder.HasKey(e => e.Id);
+
+        // Stored as a string, not its ordinal. The catalogue's Market enum was bitten by
+        // the zero-value trap — assigning the enum member that maps to 0 looks like "no
+        // change" to EF and is never written. See docs/vehicle-catalogue.md.
+        builder.Property(e => e.Category).HasConversion<string>().HasMaxLength(30);
+
+        // One rate per category, enforced by the database rather than by a rule in a
+        // handler that a second write path could skip.
+        builder.HasIndex(e => new { e.BusinessId, e.Category }).IsUnique();
+
+        builder.HasOne(e => e.TaxRate).WithMany(r => r.Categories).HasForeignKey(e => e.TaxRateId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(e => e.Business).WithMany().HasForeignKey(e => e.BusinessId);
+    }
+}
+
+public class TaxRateComponentConfiguration : IEntityTypeConfiguration<TaxRateComponent>
+{
+    public void Configure(EntityTypeBuilder<TaxRateComponent> builder)
+    {
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Name).HasMaxLength(100).IsRequired();
+        builder.Property(e => e.Rate).HasPrecision(9, 6);
+        // Cascade: components are owned by their rate and have no meaning without it.
+        builder.HasOne(e => e.TaxRate).WithMany(r => r.Components).HasForeignKey(e => e.TaxRateId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
 public class StockMovementConfiguration : IEntityTypeConfiguration<StockMovement>
 {
     public void Configure(EntityTypeBuilder<StockMovement> builder)
     {
         builder.HasKey(e => e.Id);
-        builder.HasOne(e => e.InventoryItem).WithMany(i => i.StockMovements).HasForeignKey(e => e.InventoryItemId);
+        // The movement log exists to reconstruct stock; cascading it away on item
+        // delete destroys the only audit trail there is.
+        builder.HasOne(e => e.InventoryItem).WithMany(i => i.StockMovements).HasForeignKey(e => e.InventoryItemId)
+            .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(e => e.Job).WithMany().HasForeignKey(e => e.JobId).IsRequired(false);
         builder.HasOne(e => e.Business).WithMany().HasForeignKey(e => e.BusinessId);
         builder.HasIndex(e => new { e.BusinessId, e.InventoryItemId });

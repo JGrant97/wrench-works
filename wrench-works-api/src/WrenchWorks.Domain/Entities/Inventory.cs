@@ -6,8 +6,18 @@ public class InventoryCategory : BaseEntity
     public ICollection<InventoryItem> Items { get; set; } = [];
 }
 
-public class InventoryItem : BusinessScopedEntity
+public class InventoryItem : BusinessScopedEntity, IArchivable
 {
+    /// <summary>
+    /// Shop supplies rather than a fitted part. Only affects which tax category a job line
+    /// takes — consumables still come from inventory and still bill through JobPartLine,
+    /// because a separate line type would buy nothing for tax. See docs/tax.md.
+    /// </summary>
+    public bool IsConsumable { get; set; }
+
+    /// <summary>Null while active; set when archived. See IArchivable.</summary>
+    public DateTime? ArchivedAtUtc { get; set; }
+
     public string? Sku { get; set; }
     public string Name { get; set; } = string.Empty;
     public Guid? CategoryId { get; set; }

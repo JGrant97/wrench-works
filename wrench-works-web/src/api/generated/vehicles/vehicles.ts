@@ -6,6 +6,7 @@
  * OpenAPI spec version: v1
  */
 import type {
+  ArchiveResultDto,
   CreateVehicleRequest,
   GetApiVehiclesSearchParams,
   UpdateVehicleRequest,
@@ -54,6 +55,14 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
+  export const deleteApiVehiclesId = (
+    id: string,
+ ) => {
+      return apiClient<void>(
+      {url: `/api/vehicles/${id}`, method: 'DELETE'
+    },
+      );
+    }
   export const getApiVehiclesIdHistory = (
     id: string,
  ) => {
@@ -62,8 +71,27 @@ import { apiClient } from '../../../lib/api-client';
     },
       );
     }
+  export const postApiVehiclesIdArchive = (
+    id: string,
+ ) => {
+      return apiClient<ArchiveResultDto>(
+      {url: `/api/vehicles/${id}/archive`, method: 'POST'
+    },
+      );
+    }
+  export const postApiVehiclesIdUnarchive = (
+    id: string,
+ ) => {
+      return apiClient<ArchiveResultDto>(
+      {url: `/api/vehicles/${id}/unarchive`, method: 'POST'
+    },
+      );
+    }
   export type GetApiVehiclesSearchResult = NonNullable<Awaited<ReturnType<typeof getApiVehiclesSearch>>>
 export type PostApiVehiclesResult = NonNullable<Awaited<ReturnType<typeof postApiVehicles>>>
 export type PutApiVehiclesIdResult = NonNullable<Awaited<ReturnType<typeof putApiVehiclesId>>>
 export type GetApiVehiclesIdResult = NonNullable<Awaited<ReturnType<typeof getApiVehiclesId>>>
+export type DeleteApiVehiclesIdResult = NonNullable<Awaited<ReturnType<typeof deleteApiVehiclesId>>>
 export type GetApiVehiclesIdHistoryResult = NonNullable<Awaited<ReturnType<typeof getApiVehiclesIdHistory>>>
+export type PostApiVehiclesIdArchiveResult = NonNullable<Awaited<ReturnType<typeof postApiVehiclesIdArchive>>>
+export type PostApiVehiclesIdUnarchiveResult = NonNullable<Awaited<ReturnType<typeof postApiVehiclesIdUnarchive>>>

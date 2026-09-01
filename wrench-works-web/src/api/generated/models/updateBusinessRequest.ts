@@ -8,6 +8,8 @@
 import type { UpdateBusinessRequestAddress } from './updateBusinessRequestAddress';
 import type { UpdateBusinessRequestPhone } from './updateBusinessRequestPhone';
 import type { UpdateBusinessRequestWorkingHoursJson } from './updateBusinessRequestWorkingHoursJson';
+import type { UpdateBusinessRequestTaxRegistrationNumber } from './updateBusinessRequestTaxRegistrationNumber';
+import type { UpdateBusinessRequestTaxLabel } from './updateBusinessRequestTaxLabel';
 
 export interface UpdateBusinessRequest {
   name: string;
@@ -16,4 +18,7 @@ export interface UpdateBusinessRequest {
   timezone: string;
   currency: string;
   workingHoursJson: UpdateBusinessRequestWorkingHoursJson;
+  pricesIncludeTax?: boolean;
+  taxRegistrationNumber?: UpdateBusinessRequestTaxRegistrationNumber;
+  taxLabel?: UpdateBusinessRequestTaxLabel;
 }

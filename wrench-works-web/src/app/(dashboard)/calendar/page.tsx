@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { format, startOfWeek, endOfWeek, addWeeks, subWeeks, startOfMonth, endOfMonth, subMonths, addMonths } from "date-fns";
 import { Plus, ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import { mutate } from "swr";
@@ -9,6 +9,9 @@ import { usePermission } from "@/hooks/use-permission";
 import { Button, PageHeader, Spinner, EmptyState } from "@/components/ui";
 import { ErrorState } from "@/components/data-state";
 import { cn } from "@/lib/utils";
+import { fetcher } from "@/lib/fetcher";
+import toast from "react-hot-toast";
+import { describeBookingError } from "./_lib/booking";
 import type { Booking, Zone, ViewMode } from "./_lib/booking";
 import { WeekView } from "./_components/week-view";
 import { MonthView } from "./_components/month-view";
@@ -18,13 +21,14 @@ import { EditBookingModal } from "./_components/edit-booking-modal";
 
 export default function CalendarPage() {
   const canEdit = usePermission("calendar.edit");
+
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
   const [view, setView] = useState<ViewMode>("week");
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [monthDate, setMonthDate] = useState(() => new Date());
   const [showCreate, setShowCreate] = useState(false);
   const [selectedZone, setSelectedZone] = useState("all");
-  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
-  const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
 
   // Compute query range
   const queryFrom = view === "week"
@@ -41,6 +45,35 @@ export default function CalendarPage() {
   const { data: zones, error: zonesError, mutate: reloadZones } = useApiQuery<Zone[]>("/api/zones");
 
   const activeZones = (zones ?? []).filter((z) => z.isActive);
+
+  /**
+   * Drag-to-move. Calls PUT /bookings/{id}/move, which was written with conflict checking
+   * and a job-schedule cascade and then never called by anything until now.
+   *
+   * Not optimistic: the server may reject the drop as a double-booking, and a block that
+   * snaps into place and then jumps back is worse than one that waits. The request is
+   * fast and the toast explains any rejection.
+   */
+  const handleMoveBooking = useCallback(
+    async (booking: Booking, startUtc: string, endUtc: string) => {
+      try {
+        await fetcher.put(`/api/calendar/bookings/${booking.id}/move`, {
+          zoneId: booking.zoneId,
+          startUtc,
+          endUtc,
+        });
+        toast.success("Booking moved");
+      } catch (err) {
+        // describeBookingError turns a 409 into the clashing booking's name and times.
+        toast.error(describeBookingError(err, bookings));
+      } finally {
+        // Refetch either way: on success to pick up the server's version, on failure to
+        // put the block back where it actually is.
+        mutate((key: string) => typeof key === "string" && key.startsWith("/api/calendar"));
+      }
+    },
+    [bookings]
+  );
 
   const filtered = useMemo(() => {
     const list = bookings ?? [];
@@ -135,6 +168,8 @@ export default function CalendarPage() {
         />
       ) : view === "week" ? (
         <WeekView
+          canEdit={canEdit}
+          onMoveBooking={handleMoveBooking}
           bookings={filtered}
           zones={activeZones}
           weekStart={weekStart}

@@ -17,4 +17,5 @@ page?: number | string;
 pageSize?: number | string;
 status?: string;
 search?: string;
+includeArchived?: boolean;
 };

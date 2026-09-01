@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { useCurrency } from "@/hooks/use-currency";
 import { Button, Modal, Input } from "@/components/ui";
-import { formatCurrency } from "@/lib/utils";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 
 export function AddPartModal({ jobId, onClose, onAdded }: { jobId: string; onClose: () => void; onAdded: () => void }) {
+  const { format } = useCurrency();
   const [search, setSearch] = useState("");
   const [selectedItem, setSelectedItem] = useState<{ id: string; name: string; sellPrice: number; quantityOnHand: number } | null>(null);
   const [quantity, setQuantity] = useState("1");
@@ -52,7 +53,7 @@ export function AddPartModal({ jobId, onClose, onAdded }: { jobId: string; onClo
                     onClick={() => setSelectedItem(item)}
                   >
                     <span>{item.name}</span>
-                    <span className="text-surface-400">{formatCurrency(item.sellPrice)} · {item.quantityOnHand} in stock</span>
+                    <span className="text-surface-400">{format(item.sellPrice)} · {item.quantityOnHand} in stock</span>
                   </button>
                 ))}
               </div>
@@ -63,7 +64,7 @@ export function AddPartModal({ jobId, onClose, onAdded }: { jobId: string; onClo
             <div className="p-3 bg-surface-50 rounded-lg flex justify-between items-center">
               <div>
                 <p className="font-medium text-sm">{selectedItem.name}</p>
-                <p className="text-xs text-surface-500">{formatCurrency(selectedItem.sellPrice)} each · {selectedItem.quantityOnHand} in stock</p>
+                <p className="text-xs text-surface-500">{format(selectedItem.sellPrice)} each · {selectedItem.quantityOnHand} in stock</p>
               </div>
               <button type="button" onClick={() => setSelectedItem(null)} className="text-xs text-brand-600 hover:underline">Change</button>
             </div>

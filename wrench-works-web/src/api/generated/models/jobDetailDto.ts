@@ -17,6 +17,9 @@ import type { PartLineDto } from './partLineDto';
 import type { JobDetailDtoLaborTotal } from './jobDetailDtoLaborTotal';
 import type { JobDetailDtoPartsTotal } from './jobDetailDtoPartsTotal';
 import type { JobDetailDtoGrandTotal } from './jobDetailDtoGrandTotal';
+import type { JobDetailDtoSubTotal } from './jobDetailDtoSubTotal';
+import type { JobDetailDtoTaxTotal } from './jobDetailDtoTaxTotal';
+import type { TaxLineDto } from './taxLineDto';
 
 export interface JobDetailDto {
   id: string;
@@ -41,5 +44,13 @@ export interface JobDetailDto {
   partsTotal: JobDetailDtoPartsTotal;
   /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
   grandTotal: JobDetailDtoGrandTotal;
+  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
+  subTotal: JobDetailDtoSubTotal;
+  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
+  taxTotal: JobDetailDtoTaxTotal;
+  taxLabel: string;
+  pricesIncludeTax: boolean;
+  customerIsTaxExempt: boolean;
+  taxBreakdown: TaxLineDto[];
   createdAtUtc: string;
 }

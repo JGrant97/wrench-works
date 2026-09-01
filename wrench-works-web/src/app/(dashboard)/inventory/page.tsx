@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useApi, useApiQuery } from "@/hooks/use-api";
+import { useCurrency } from "@/hooks/use-currency";
 import { usePermission } from "@/hooks/use-permission";
 import { Button, Badge, Card, Modal, Input, Select, PageHeader, Spinner, EmptyState } from "@/components/ui";
-import { formatCurrency } from "@/lib/utils";
 import { Plus, Package, Search, AlertTriangle, Pencil } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
@@ -15,11 +15,14 @@ import { FeatureGate } from "@/components/feature-gate";
 interface InventoryItem {
   id: string; name: string; sku: string | null; categoryId: string | null; categoryName: string | null;
   unitCost: number; retailPrice: number | null; stockOnHand: number; reorderThreshold: number; lowStock: boolean;
+  /** Shop supplies rather than a fitted part — decides the tax category. See docs/tax.md. */
+  isConsumable: boolean;
 }
 interface Category { id: string; name: string; }
 interface ListResponse { items: InventoryItem[]; total: number; page: number; pageSize: number; }
 
 export default function InventoryPage() {
+  const { format } = useCurrency();
   const canManage = usePermission("inventory.manage");
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -84,8 +87,8 @@ export default function InventoryPage() {
                       {item.lowStock && <AlertTriangle size={12} className="inline mr-1" />}{item.stockOnHand}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right text-surface-500">{formatCurrency(item.unitCost)}</td>
-                  <td className="px-4 py-3 text-right font-medium">{item.retailPrice != null ? formatCurrency(item.retailPrice) : "—"}</td>
+                  <td className="px-4 py-3 text-right text-surface-500">{format(item.unitCost)}</td>
+                  <td className="px-4 py-3 text-right font-medium">{item.retailPrice != null ? format(item.retailPrice) : "—"}</td>
                   {canManage && (
                     <td className="px-4 py-3 text-right space-x-1">
                       <Button variant="ghost" size="sm" onClick={() => setEditItem(item)}><Pencil size={14} /></Button>
@@ -115,7 +118,8 @@ export default function InventoryPage() {
 }
 
 function CreateItemModal({ categories, onClose, onCreated }: { categories: Category[]; onClose: () => void; onCreated: () => void }) {
-  const [form, setForm] = useState({ name: "", sku: "", categoryId: "", unitCost: "", retailPrice: "", stockOnHand: "0", reorderThreshold: "5" });
+  const { symbol } = useCurrency();
+  const [form, setForm] = useState({ name: "", sku: "", categoryId: "", unitCost: "", retailPrice: "", stockOnHand: "0", reorderThreshold: "5", isConsumable: false });
   const [loading, setLoading] = useState(false);
   const u = (f: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((p) => ({ ...p, [f]: e.target.value }));
 
@@ -126,6 +130,7 @@ function CreateItemModal({ categories, onClose, onCreated }: { categories: Categ
         name: form.name, sku: form.sku || null, categoryId: form.categoryId || null,
         unitCost: parseFloat(form.unitCost) || 0, retailPrice: form.retailPrice ? parseFloat(form.retailPrice) : null,
         stockOnHand: parseInt(form.stockOnHand) || 0, reorderThreshold: parseInt(form.reorderThreshold) || 0,
+        isConsumable: form.isConsumable,
       });
       toast.success("Item created"); onCreated();
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : "Failed"); } finally { setLoading(false); }
@@ -140,13 +145,47 @@ function CreateItemModal({ categories, onClose, onCreated }: { categories: Categ
           <Select id="catId" label="Category" value={form.categoryId} onChange={u("categoryId")} placeholder="Select" options={categories.map((c) => ({ value: c.id, label: c.name }))} />
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <Input id="unitCost" label="Unit Cost (£)" type="number" step="0.01" min="0" required value={form.unitCost} onChange={u("unitCost")} />
-          <Input id="retailPrice" label="Retail Price (£)" type="number" step="0.01" min="0" value={form.retailPrice} onChange={u("retailPrice")} />
+          <Input id="unitCost" label={`Unit Cost (${symbol})`} type="number" step="0.01" min="0" required value={form.unitCost} onChange={u("unitCost")} />
+          <Input id="retailPrice" label={`Retail Price (${symbol})`} type="number" step="0.01" min="0" value={form.retailPrice} onChange={u("retailPrice")} />
         </div>
         <div className="grid grid-cols-2 gap-4">
           <Input id="stock" label="Opening Stock" type="number" min="0" value={form.stockOnHand} onChange={u("stockOnHand")} />
           <Input id="reorder" label="Reorder Level" type="number" min="0" value={form.reorderThreshold} onChange={u("reorderThreshold")} />
+        {/* Only affects which tax category a job line takes; consumables still come from
+            stock and still bill as a part line. See docs/tax.md. */}
+        <label className="flex items-start gap-2 text-sm text-surface-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={form.isConsumable}
+            onChange={(e) => setForm((f) => ({ ...f, isConsumable: e.target.checked }))}
+          />
+          <span>
+            Consumable
+            <span className="block text-xs text-surface-500">
+              Shop supplies and disposal levies, taxed separately from fitted parts.
+            </span>
+          </span>
+        </label>
+
         </div>
+        {/* Only affects which tax category a job line takes; consumables still come from
+            stock and still bill as a part line. See docs/tax.md. */}
+        <label className="flex items-start gap-2 text-sm text-surface-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={form.isConsumable}
+            onChange={(e) => setForm((f) => ({ ...f, isConsumable: e.target.checked }))}
+          />
+          <span>
+            Consumable
+            <span className="block text-xs text-surface-500">
+              Shop supplies and disposal levies, taxed separately from fitted parts.
+            </span>
+          </span>
+        </label>
+
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={loading}>Create</Button>
@@ -157,9 +196,11 @@ function CreateItemModal({ categories, onClose, onCreated }: { categories: Categ
 }
 
 function EditItemModal({ item, categories, onClose, onSaved }: { item: InventoryItem; categories: Category[]; onClose: () => void; onSaved: () => void }) {
+  const { symbol } = useCurrency();
   const [form, setForm] = useState({
     name: item.name, sku: item.sku ?? "", categoryId: item.categoryId ?? "",
     unitCost: String(item.unitCost), retailPrice: item.retailPrice != null ? String(item.retailPrice) : "", reorderThreshold: String(item.reorderThreshold),
+    isConsumable: item.isConsumable,
   });
   const [loading, setLoading] = useState(false);
   const u = (f: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((p) => ({ ...p, [f]: e.target.value }));
@@ -171,6 +212,7 @@ function EditItemModal({ item, categories, onClose, onSaved }: { item: Inventory
         name: form.name, sku: form.sku || null, categoryId: form.categoryId || null,
         unitCost: parseFloat(form.unitCost) || 0, retailPrice: form.retailPrice ? parseFloat(form.retailPrice) : null,
         reorderThreshold: parseInt(form.reorderThreshold) || 0,
+        isConsumable: form.isConsumable,
       });
       toast.success("Item updated"); onSaved();
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : "Failed"); } finally { setLoading(false); }
@@ -185,8 +227,8 @@ function EditItemModal({ item, categories, onClose, onSaved }: { item: Inventory
           <Select id="catId" label="Category" value={form.categoryId} onChange={u("categoryId")} placeholder="None" options={categories.map((c) => ({ value: c.id, label: c.name }))} />
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <Input id="unitCost" label="Unit Cost (£)" type="number" step="0.01" min="0" required value={form.unitCost} onChange={u("unitCost")} />
-          <Input id="retailPrice" label="Retail Price (£)" type="number" step="0.01" min="0" value={form.retailPrice} onChange={u("retailPrice")} />
+          <Input id="unitCost" label={`Unit Cost (${symbol})`} type="number" step="0.01" min="0" required value={form.unitCost} onChange={u("unitCost")} />
+          <Input id="retailPrice" label={`Retail Price (${symbol})`} type="number" step="0.01" min="0" value={form.retailPrice} onChange={u("retailPrice")} />
         </div>
         <Input id="reorder" label="Reorder Level" type="number" min="0" value={form.reorderThreshold} onChange={u("reorderThreshold")} />
         <div className="flex justify-end gap-2 pt-2">

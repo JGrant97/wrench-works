@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { usePermission } from "@/hooks/use-permission";
 import { Button, Card, Modal, Input, PageHeader, Spinner } from "@/components/ui";
 import { SettingsNav } from "@/components/settings-nav";
 import { Plus, Pencil } from "lucide-react";
@@ -9,6 +10,7 @@ import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
 import { ErrorState } from "@/components/data-state";
+import { RecordActions } from "@/components/record-actions";
 
 interface Zone {
   id: string;
@@ -19,6 +21,9 @@ interface Zone {
 }
 
 export default function SettingsZonesPage() {
+  // The zones endpoints require settings.manage; the page previously offered the
+  // controls to everyone and let the server reject them.
+  const canManage = usePermission("settings.manage");
   const { data: zones, isLoading, error } = useApi<Zone[]>("/api/zones");
   const [editZone, setEditZone] = useState<Zone | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -53,7 +58,18 @@ export default function SettingsZonesPage() {
                         <p className="text-xs text-surface-500">Capacity: {z.capacity} · {z.isActive ? "Active" : "Inactive"}</p>
                       </div>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => setEditZone(z)}><Pencil size={14} /></Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => setEditZone(z)}><Pencil size={14} /></Button>
+                      <RecordActions
+                        resource="zones"
+                        id={z.id}
+                        label="zone"
+                        allowArchive={false}
+                        canManage={canManage}
+                        onChanged={refresh}
+                        afterDelete={refresh}
+                      />
+                    </div>
                   </div>
                 ))}
               </div>

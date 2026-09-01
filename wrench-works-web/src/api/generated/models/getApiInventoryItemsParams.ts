@@ -18,4 +18,5 @@ pageSize?: number | string;
 search?: string;
 categoryId?: string;
 lowStockOnly?: boolean;
+includeArchived?: boolean;
 };

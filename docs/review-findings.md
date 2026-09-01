@@ -188,7 +188,7 @@ Same shape, smaller blast radius: `UserEndpoints.InviteAsync` (membership then r
 ## Latent — data-loss shaped, dormant only because the endpoint doesn't exist yet
 
 ### 9. Cascade deletes destroy audit and billing history
-**Reported · pre-existing**
+**Verified · pre-existing · FIXED 31 Aug 2026**
 
 FKs default to `Cascade` unless overridden. `Vehicle.VariantId`/`ColourId` were deliberately set to `Restrict` so catalogue data can't be deleted out from under a vehicle — that discipline wasn't applied to:
 
@@ -198,6 +198,24 @@ FKs default to `Cascade` unless overridden. `Vehicle.VariantId`/`ColourId` were 
 - `Vehicles`/`Jobs`/`Bookings → Customers` — deleting a customer wipes their entire history
 
 No delete endpoints exist for these today. **Set them to `Restrict` (or model deletion as deactivation, as `Zone.IsActive` already does) before the first such endpoint is built**, or that endpoint's first use is a data-loss incident.
+
+**Fixed, and the warning turned out to be exactly right.** Full CRUD was requested on
+31 Aug 2026, which made this finding load-bearing rather than latent. Eight FKs moved to
+`Restrict` in `20260831225523_AddArchivingAndRestrictCascades`:
+`Vehicle→Customer`, `Booking→Zone/Customer/Vehicle`, `Job→Customer/Vehicle`,
+`JobPartLine→InventoryItem`, `StockMovement→InventoryItem`.
+
+Left as `Cascade` deliberately: every `Business → X` (so offboarding a tenant still
+removes its data), `Job → LaborLines/PartLines/Assignments` (owned children of the job),
+and `Make → Model → Variant` (an owned catalogue hierarchy).
+
+Delete now removes a row only when nothing references it; anything with history is
+archived instead. *Verified by tests* —
+`CrudTests.DeleteCustomer_WithAVehicle_IsRefusedAndDestroysNothing` asserts the customer
+**and the vehicle** both survive the refused delete, which is the assertion that would
+have failed under the old cascades. *Verified in the browser*: deleting a customer with
+history shows "This customer has 1 vehicle, 9 jobs, 10 bookings and cannot be deleted",
+with Archive offered in the same dialog.
 
 *Finding 10 was here and is now under [Fixed](#fixed--31-aug-2026).*
 

@@ -1,7 +1,10 @@
 namespace WrenchWorks.Domain.Entities;
 
-public class Job : BusinessScopedEntity
+public class Job : BusinessScopedEntity, IArchivable
 {
+    /// <summary>Null while active; set when archived. See IArchivable.</summary>
+    public DateTime? ArchivedAtUtc { get; set; }
+
     public Guid CustomerId { get; set; }
     public Customer Customer { get; set; } = null!;
     public Guid VehicleId { get; set; }
@@ -45,6 +48,13 @@ public class JobLaborLine : BaseEntity
     public string Description { get; set; } = string.Empty;
     public decimal Hours { get; set; }
     public decimal Rate { get; set; }
+
+    // Tax as applied, snapshotted. Never recomputed from current settings: when UK VAT
+    // moved 17.5% -> 20% -> 15% -> 20%, systems that recomputed silently rewrote their own
+    // history. See docs/tax.md.
+    public Guid? TaxRateId { get; set; }
+    public decimal TaxRatePercent { get; set; }
+    public decimal TaxAmount { get; set; }
 }
 
 public class JobPartLine : BaseEntity
@@ -55,6 +65,13 @@ public class JobPartLine : BaseEntity
     public InventoryItem InventoryItem { get; set; } = null!;
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
+
+    // Tax as applied, snapshotted. Never recomputed from current settings: when UK VAT
+    // moved 17.5% -> 20% -> 15% -> 20%, systems that recomputed silently rewrote their own
+    // history. See docs/tax.md.
+    public Guid? TaxRateId { get; set; }
+    public decimal TaxRatePercent { get; set; }
+    public decimal TaxAmount { get; set; }
 }
 
 public class JobAssignment

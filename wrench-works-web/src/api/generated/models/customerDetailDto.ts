@@ -10,6 +10,7 @@ import type { CustomerDetailDtoEmail } from './customerDetailDtoEmail';
 import type { CustomerDetailDtoAddress } from './customerDetailDtoAddress';
 import type { CustomerDetailDtoPreferredContactMethod } from './customerDetailDtoPreferredContactMethod';
 import type { CustomerDetailDtoNotes } from './customerDetailDtoNotes';
+import type { CustomerDetailDtoTaxExemptionReference } from './customerDetailDtoTaxExemptionReference';
 import type { CustomerVehicleDto } from './customerVehicleDto';
 import type { CustomerJobDto } from './customerJobDto';
 
@@ -21,6 +22,8 @@ export interface CustomerDetailDto {
   address: CustomerDetailDtoAddress;
   preferredContactMethod: CustomerDetailDtoPreferredContactMethod;
   notes: CustomerDetailDtoNotes;
+  isTaxExempt: boolean;
+  taxExemptionReference: CustomerDetailDtoTaxExemptionReference;
   vehicles: CustomerVehicleDto[];
   recentJobs: CustomerJobDto[];
   createdAtUtc: string;
