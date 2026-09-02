@@ -1,35 +1,21 @@
 using FluentValidation;
-using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
 using WrenchWorks.Api.Middleware;
-using WrenchWorks.Domain.Entities;
-using WrenchWorks.Infrastructure.Persistence;
+using Entities = WrenchWorks.Domain.Entities;
 
 namespace WrenchWorks.Api.Features.Business;
 
-public class BusinessService(AppDbContext db, CurrentUserService currentUser) : IBusinessService
+public class BusinessService(IBusinessRepository repository, CurrentUserService currentUser) : IBusinessService
 {
-    public async Task<BusinessDto> GetAsync(CancellationToken ct)
-    {
-        var businessId = currentUser.RequireBusinessId();
-        var business = await db.Businesses.FindAsync([businessId], ct)
+    public async Task<Entities.Business> GetAsync(CancellationToken ct) =>
+        await repository.FindAsync(currentUser.RequireBusinessId(), ct)
             ?? throw new NotFoundException("Business not found");
 
-        return new BusinessDto(
-            business.Id, business.Name, business.Address, business.Phone,
-            business.Timezone, business.Currency, business.LogoUrl,
-            business.WorkingHoursJson,
-            business.PricesIncludeTax, business.TaxRegistrationNumber, business.TaxLabel,
-            business.CreatedAtUtc);
-    }
-
-    public async Task<BusinessDto> UpdateAsync(UpdateBusinessRequest request, CancellationToken ct)
+    public async Task<Entities.Business> UpdateAsync(UpdateBusinessRequest request, CancellationToken ct)
     {
         await new UpdateBusinessValidator().ValidateAndThrowAsync(request, ct);
 
-        var businessId = currentUser.RequireBusinessId();
-        var business = await db.Businesses.FindAsync([businessId], ct)
+        var business = await repository.FindAsync(currentUser.RequireBusinessId(), ct)
             ?? throw new NotFoundException("Business not found");
 
         business.Name = request.Name.Trim();
@@ -43,13 +29,7 @@ public class BusinessService(AppDbContext db, CurrentUserService currentUser) : 
         business.TaxLabel = string.IsNullOrWhiteSpace(request.TaxLabel) ? "Tax" : request.TaxLabel.Trim();
         business.WorkingHoursJson = request.WorkingHoursJson;
 
-        await db.SaveChangesAsync(ct);
-
-        return new BusinessDto(
-            business.Id, business.Name, business.Address, business.Phone,
-            business.Timezone, business.Currency, business.LogoUrl,
-            business.WorkingHoursJson,
-            business.PricesIncludeTax, business.TaxRegistrationNumber, business.TaxLabel,
-            business.CreatedAtUtc);
+        await repository.SaveChangesAsync(ct);
+        return business;
     }
 }

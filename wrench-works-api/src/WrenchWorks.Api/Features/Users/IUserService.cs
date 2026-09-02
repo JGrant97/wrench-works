@@ -1,11 +1,14 @@
+using WrenchWorks.Domain.Entities;
+
 namespace WrenchWorks.Api.Features.Users;
 
-// The User slice behind an interface: the endpoints become a thin HTTP shell.
-// Methods return DTOs, not IResult -- failures are thrown and mapped by
-// ErrorHandlingMiddleware, so nothing here needs to know about status codes.
+// The membership plus the permissions from the current JWT. Permissions are session state
+// rather than a stored property of the membership, so they are carried alongside it.
+public record CurrentUserProfile(BusinessUser Membership, IEnumerable<string> Permissions);
+
 public interface IUserService
 {
-    Task<List<UserListItemDto>> ListAsync(CancellationToken ct);
-    Task<InvitedUserDto> InviteAsync(InviteUserRequest request, CancellationToken ct);
-    Task<CurrentUserDto> GetMeAsync(CancellationToken ct);
+    Task<List<BusinessUser>> ListAsync(CancellationToken ct);
+    Task<BusinessUser> InviteAsync(InviteUserRequest request, CancellationToken ct);
+    Task<CurrentUserProfile> GetMeAsync(CancellationToken ct);
 }

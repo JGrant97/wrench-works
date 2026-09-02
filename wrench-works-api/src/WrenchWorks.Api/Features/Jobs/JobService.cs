@@ -1,19 +1,16 @@
 using FluentValidation;
-using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
 using WrenchWorks.Api.Features.Common;
 using WrenchWorks.Api.Middleware;
 using WrenchWorks.Domain.Entities;
-using WrenchWorks.Infrastructure.Persistence;
 
 namespace WrenchWorks.Api.Features.Jobs;
 
-public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobService
+public class JobService(IJobRepository repository, CurrentUserService currentUser) : IJobService
 {
     // Which statuses a job may move to from each status. Static because it is a fixed
-    // property of the domain, not per-request state -- it was previously rebuilt as a new
-    // Dictionary on every single status change.
+    // property of the domain, not per-request state. Mirrored by STATUS_TRANSITIONS in the
+    // web app jobs/[id]/_lib/job.ts -- change one and you must change the other.
     private static readonly Dictionary<JobStatus, JobStatus[]> ValidTransitions = new()
     {
         [JobStatus.Draft] = [JobStatus.Scheduled, JobStatus.Closed],
@@ -25,107 +22,22 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
         [JobStatus.Closed] = []
     };
 
-    public async Task<PagedResult<JobListItemDto>> ListAsync(int page = 1, int pageSize = 25, string? status = null, string? search = null, bool includeArchived = false, CancellationToken ct = default)
+    public Task<PagedResult<Job>> ListAsync(int page, int pageSize, string? status,
+        string? search, bool includeArchived, CancellationToken ct) =>
+        repository.ListAsync(page, pageSize, status, search, includeArchived, ct);
+
+    public async Task<JobDetail> GetAsync(Guid id, CancellationToken ct)
     {
-        var query = db.Jobs
-            .Include(j => j.Customer)
-            .Include(j => j.Vehicle)
-            .Include(j => j.AssignedZone)
-            .AsQueryable();
-
-        if (!includeArchived) query = query.Where(j => j.ArchivedAtUtc == null);
-
-        if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<JobStatus>(status, true, out var st))
-            query = query.Where(j => j.Status == st);
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var s = search.ToLower();
-            query = query.Where(j => j.Title.ToLower().Contains(s) || j.Customer.Name.ToLower().Contains(s));
-        }
-
-        var total = await query.CountAsync(ct);
-        var items = await query
-            .OrderByDescending(j => j.CreatedAtUtc)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(j => new JobListItemDto(
-                j.Id, j.Title, j.Status.ToString(), j.Priority.ToString(),
-                j.Customer.Name,
-                (j.Vehicle.DisplayName ?? "") + (j.Vehicle.Registration != null ? " " + j.Vehicle.Registration : ""),
-                j.AssignedZone != null ? j.AssignedZone.Name : null,
-                j.ScheduledStartUtc,
-                j.LaborLines.Sum(l => l.Hours * l.Rate),
-                j.PartLines.Sum(p => p.Quantity * p.UnitPrice),
-                j.CreatedAtUtc))
-            .ToListAsync(ct);
-
-        return new PagedResult<JobListItemDto>(items, total, page, pageSize);
-    }
-
-    // <summary>
-    // A job may be deleted outright only while it is still a Draft — nothing has been
-    // worked, billed or booked against it, so there is no history to lose. Once it has
-    // been scheduled or beyond it is archived instead: labor and part lines are its own
-    // children and would cascade away with it, taking the record of what the customer
-    // was charged and why stock left the shelf.
-    // </summary>
-    public async Task DeleteAsync(Guid id, CancellationToken ct)
-    {
-        var job = await db.Jobs.FindAsync([id], ct)
+        var job = await repository.FindWithLinesAsync(id, ct)
             ?? throw new NotFoundException("Job not found");
 
-        if (job.Status != JobStatus.Draft)
-            throw new ConflictException(
-                $"A {job.Status} job cannot be deleted because it carries billing and stock history. " +
-                "Archive it instead — it will be hidden from lists while its history stays intact.");
+        var business = await repository.FindBusinessAsync(job.BusinessId, ct);
+        var pricesIncludeTax = business?.PricesIncludeTax ?? false;
 
-        Archiving.EnsureDeletable("job",
-            new Dependent("labour lines", await db.JobLaborLines.CountAsync(l => l.JobId == id, ct)),
-            new Dependent("part lines", await db.JobPartLines.CountAsync(p => p.JobId == id, ct)),
-            new Dependent("bookings", await db.Bookings.CountAsync(b => b.JobId == id, ct)));
-
-        db.Jobs.Remove(job);
-        await db.SaveChangesAsync(ct);
-        return;
-    }
-
-    public async Task<ArchiveResultDto> ArchiveAsync(Guid id, CancellationToken ct)
-    {
-        var job = await db.Jobs.FindAsync([id], ct) ?? throw new NotFoundException("Job not found");
-        var result = Archiving.Archive(job, id);
-        await db.SaveChangesAsync(ct);
-        return result;
-    }
-
-    public async Task<ArchiveResultDto> UnarchiveAsync(Guid id, CancellationToken ct)
-    {
-        var job = await db.Jobs.FindAsync([id], ct) ?? throw new NotFoundException("Job not found");
-        var result = Archiving.Unarchive(job, id);
-        await db.SaveChangesAsync(ct);
-        return result;
-    }
-
-    public async Task<JobDetailDto> GetAsync(Guid id, CancellationToken ct)
-    {
-        var job = await db.Jobs
-            .Include(j => j.Customer)
-            .Include(j => j.Vehicle)
-            .Include(j => j.AssignedZone)
-            .Include(j => j.LaborLines)
-            .Include(j => j.PartLines).ThenInclude(pl => pl.InventoryItem)
-            .FirstOrDefaultAsync(j => j.Id == id, ct)
-            ?? throw new NotFoundException("Job not found");
-
-        var laborLines = job.LaborLines.Select(l => new LaborLineDto(l.Id, l.Description, l.Hours, l.Rate, l.Hours * l.Rate, l.TaxRatePercent, l.TaxAmount));
-        var partLines = job.PartLines.Select(p => new PartLineDto(p.Id, p.InventoryItemId, p.InventoryItem.Name, p.InventoryItem.Sku, p.Quantity, p.UnitPrice, p.Quantity * p.UnitPrice, p.TaxRatePercent, p.TaxAmount));
         var laborTotal = job.LaborLines.Sum(l => l.Hours * l.Rate);
         var partsTotal = job.PartLines.Sum(p => p.Quantity * p.UnitPrice);
 
-        var business = await db.Businesses.FindAsync([job.BusinessId], ct);
-        var pricesIncludeTax = business?.PricesIncludeTax ?? false;
-
-        // Totals come from the SNAPSHOTTED amounts, never recomputed from current rates —
+        // Totals come from the SNAPSHOTTED amounts, never recomputed from current rates --
         // a rate change must not silently rewrite what a past job was charged.
         var taxTotal = job.LaborLines.Sum(l => l.TaxAmount) + job.PartLines.Sum(p => p.TaxAmount);
         var lineTotal = laborTotal + partsTotal;
@@ -135,34 +47,24 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
         var subTotal = pricesIncludeTax ? lineTotal - taxTotal : lineTotal;
         var grandTotal = pricesIncludeTax ? lineTotal : lineTotal + taxTotal;
 
-        var breakdown = await BuildTaxBreakdownAsync(db, job, ct);
-
-        return new JobDetailDto(
-            job.Id, job.Title, job.Status.ToString(), job.Priority.ToString(),
-            job.CustomerId, job.Customer.Name,
-            job.VehicleId,
-            $"{job.Vehicle.DisplayName} {job.Vehicle.Registration}".Trim(),
-            job.AssignedZoneId, job.AssignedZone?.Name,
-            job.InternalNotes, job.CustomerNotes,
-            job.ScheduledStartUtc, job.ScheduledEndUtc,
-            laborLines, partLines,
-            laborTotal, partsTotal, grandTotal,
-            subTotal, taxTotal,
+        return new JobDetail(
+            job,
+            new JobTotals(laborTotal, partsTotal, subTotal, taxTotal, grandTotal),
             business?.TaxLabel ?? "Tax",
             pricesIncludeTax,
-            job.Customer.IsTaxExempt,
-            breakdown,
-            job.CreatedAtUtc);
+            await BuildTaxBreakdownAsync(job, ct));
     }
 
-    public async Task<JobCreatedDto> CreateAsync(CreateJobRequest request, CancellationToken ct)
+    public async Task<Job> CreateAsync(CreateJobRequest request, CancellationToken ct)
     {
         await new CreateJobValidator().ValidateAndThrowAsync(request, ct);
 
         var businessId = currentUser.RequireBusinessId();
-        _ = await db.Customers.FindAsync([request.CustomerId], ct) ?? throw new NotFoundException("Customer not found");
-        _ = await db.Vehicles.FindAsync([request.VehicleId], ct) ?? throw new NotFoundException("Vehicle not found");
-        await EnsureZoneIsOursAsync(db, request.ZoneId, ct);
+        _ = await repository.FindCustomerAsync(request.CustomerId, ct)
+            ?? throw new NotFoundException("Customer not found");
+        _ = await repository.FindVehicleAsync(request.VehicleId, ct)
+            ?? throw new NotFoundException("Vehicle not found");
+        await EnsureZoneIsOursAsync(request.ZoneId, ct);
 
         var job = new Job
         {
@@ -179,20 +81,18 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
             Status = request.ScheduledStartUtc.HasValue ? JobStatus.Scheduled : JobStatus.Draft,
             CreatedByUserId = currentUser.UserId
         };
-        db.Jobs.Add(job);
-        await db.SaveChangesAsync(ct);
 
-        return new JobCreatedDto(job.Id, job.Status);
+        repository.AddJob(job);
+        await repository.SaveChangesAsync(ct);
+        return job;
     }
 
-    public async Task<JobSummaryDto> UpdateJobAsync(Guid id, UpdateJobRequest request, CancellationToken ct)
+    public async Task<Job> UpdateJobAsync(Guid id, UpdateJobRequest request, CancellationToken ct)
     {
-        var job = await db.Jobs.FindAsync([id], ct)
+        var job = await repository.FindAsync(id, ct)
             ?? throw new NotFoundException("Job not found");
 
-        // Prevent editing closed/completed/invoiced jobs
-        if (job.Status is JobStatus.Closed or JobStatus.Completed or JobStatus.Invoiced)
-            throw new ValidationException($"Cannot edit a {job.Status} job");
+        EnsureModifiable(job, "edit");
 
         if (!Enum.TryParse<JobPriority>(request.Priority, true, out var priority))
             throw new ValidationException("Invalid priority");
@@ -201,16 +101,15 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
         job.InternalNotes = request.InternalNotes;
         job.CustomerNotes = request.CustomerNotes;
         job.Priority = priority;
-        await EnsureZoneIsOursAsync(db, request.ZoneId, ct);
+        await EnsureZoneIsOursAsync(request.ZoneId, ct);
         job.AssignedZoneId = request.ZoneId;
         job.ScheduledStartUtc = request.ScheduledStartUtc;
         job.ScheduledEndUtc = request.ScheduledEndUtc;
 
-        // Sync linked booking if the schedule changed
+        // Keep the linked booking in step if the schedule changed.
         if (request.ScheduledStartUtc.HasValue && request.ScheduledEndUtc.HasValue)
         {
-            var booking = await FindLinkedBookingAsync(db, job, ct);
-
+            var booking = await repository.FindLinkedBookingAsync(job, ct);
             if (booking != null)
             {
                 booking.StartUtc = request.ScheduledStartUtc.Value;
@@ -222,31 +121,31 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
             }
         }
 
-        await db.SaveChangesAsync(ct);
-        return new JobSummaryDto(job.Id, job.Title, job.Status.ToString(), job.Priority.ToString());
+        await repository.SaveChangesAsync(ct);
+        return job;
     }
 
-    public async Task<JobStatusDto> UpdateStatusAsync(Guid id, UpdateJobStatusRequest request, CancellationToken ct)
+    public async Task<Job> UpdateStatusAsync(Guid id, UpdateJobStatusRequest request, CancellationToken ct)
     {
         if (!Enum.TryParse<JobStatus>(request.Status, true, out var newStatus))
             throw new ValidationException("Invalid status");
 
-        var job = await db.Jobs.FindAsync([id], ct)
+        var job = await repository.FindAsync(id, ct)
             ?? throw new NotFoundException("Job not found");
 
         if (!ValidTransitions.TryGetValue(job.Status, out var allowed) || !allowed.Contains(newStatus))
             throw new ValidationException($"Cannot transition from {job.Status} to {newStatus}");
 
-        var booking = await FindLinkedBookingAsync(db, job, ct);
+        var booking = await repository.FindLinkedBookingAsync(job, ct);
 
         job.Status = newStatus;
-        SyncBookingToJobStatus(db, job, booking, newStatus, currentUser.UserId);
-        await db.SaveChangesAsync(ct);
+        SyncBookingToJobStatus(job, booking, newStatus);
+        await repository.SaveChangesAsync(ct);
 
         // Second save: the audit row is written only once the change it records has
         // actually committed, so a failed status change cannot leave a log saying it
-        // succeeded. (Not atomic — see finding 8 in docs/review-findings.md.)
-        db.AuditLogs.Add(new AuditLog
+        // succeeded. Not atomic -- see finding 8 in docs/review-findings.md.
+        repository.AddAuditLog(new AuditLog
         {
             BusinessId = job.BusinessId,
             UserId = currentUser.UserId,
@@ -255,20 +154,19 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
             EntityId = job.Id,
             NewValues = $"{{\"status\":\"{newStatus}\"}}"
         });
-        await db.SaveChangesAsync(ct);
+        await repository.SaveChangesAsync(ct);
 
-        return new JobStatusDto(job.Id, job.Status.ToString());
+        return job;
     }
 
-    public async Task<PartLineDto> AddPartAsync(Guid id, AddPartToJobRequest request, CancellationToken ct)
+    public async Task<JobPartLine> AddPartAsync(Guid id, AddPartToJobRequest request, CancellationToken ct)
     {
-        var job = await db.Jobs.FindAsync([id], ct)
+        var job = await repository.FindAsync(id, ct)
             ?? throw new NotFoundException("Job not found");
 
-        if (job.Status is JobStatus.Closed or JobStatus.Completed or JobStatus.Invoiced)
-            throw new ValidationException($"Cannot modify a {job.Status} job");
+        EnsureModifiable(job, "modify");
 
-        var item = await db.InventoryItems.FindAsync([request.InventoryItemId], ct)
+        var item = await repository.FindInventoryItemAsync(request.InventoryItemId, ct)
             ?? throw new NotFoundException("Inventory item not found");
 
         if (item.StockOnHand < (int)request.Quantity)
@@ -281,14 +179,17 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
             JobId = id,
             InventoryItemId = request.InventoryItemId,
             Quantity = request.Quantity,
-            UnitPrice = unitPrice
+            UnitPrice = unitPrice,
+            // Set so the handler can name the part without re-reading it.
+            InventoryItem = item
         };
 
-        var business = await db.Businesses.FindAsync([job.BusinessId], ct);
-        // A consumable is taxed as a consumable, not as a part — the whole reason the flag
+        var business = await repository.FindBusinessAsync(job.BusinessId, ct);
+
+        // A consumable is taxed as a consumable, not as a part -- the whole reason the flag
         // exists. See docs/tax.md.
         var category = item.IsConsumable ? TaxCategory.Consumables : TaxCategory.Parts;
-        var (rateId, percent) = await ResolveTaxRateAsync(db, job.CustomerId, category, ct);
+        var (rateId, percent) = await ResolveTaxRateAsync(job.CustomerId, category, ct);
         var taxed = TaxCalculator.CalculateLine(
             new TaxableLine(partLine.Quantity * partLine.UnitPrice, percent),
             business?.PricesIncludeTax ?? false);
@@ -297,10 +198,9 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
         partLine.TaxRatePercent = percent;
         partLine.TaxAmount = taxed.Tax;
 
-        db.JobPartLines.Add(partLine);
+        repository.AddPartLine(partLine);
 
-        // Create stock movement
-        var movement = new StockMovement
+        repository.AddStockMovement(new StockMovement
         {
             BusinessId = job.BusinessId,
             InventoryItemId = request.InventoryItemId,
@@ -308,24 +208,22 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
             Reason = StockMovementReason.JobConsumption,
             JobId = id,
             CreatedByUserId = currentUser.UserId
-        };
-        db.StockMovements.Add(movement);
+        });
         item.StockOnHand -= (int)request.Quantity;
 
-        await db.SaveChangesAsync(ct);
-
-        return new PartLineDto(partLine.Id, partLine.InventoryItemId, item.Name, item.Sku, partLine.Quantity, partLine.UnitPrice, partLine.Quantity * partLine.UnitPrice, partLine.TaxRatePercent, partLine.TaxAmount);
+        await repository.SaveChangesAsync(ct);
+        return partLine;
     }
 
-    public async Task<LaborLineDto> AddLaborAsync(Guid id, AddLaborLineRequest request, CancellationToken ct)
+    public async Task<JobLaborLine> AddLaborAsync(Guid id, AddLaborLineRequest request, CancellationToken ct)
     {
-        var job = await db.Jobs.FindAsync([id], ct) ?? throw new NotFoundException("Job not found");
+        var job = await repository.FindAsync(id, ct)
+            ?? throw new NotFoundException("Job not found");
 
-        if (job.Status is JobStatus.Closed or JobStatus.Completed or JobStatus.Invoiced)
-            throw new ValidationException($"Cannot modify a {job.Status} job");
+        EnsureModifiable(job, "modify");
 
-        var business = await db.Businesses.FindAsync([job.BusinessId], ct);
-        var (rateId, percent) = await ResolveTaxRateAsync(db, job.CustomerId, TaxCategory.Labour, ct);
+        var business = await repository.FindBusinessAsync(job.BusinessId, ct);
+        var (rateId, percent) = await ResolveTaxRateAsync(job.CustomerId, TaxCategory.Labour, ct);
         var lineTotal = request.Hours * request.Rate;
         var taxed = TaxCalculator.CalculateLine(
             new TaxableLine(lineTotal, percent), business?.PricesIncludeTax ?? false);
@@ -340,30 +238,33 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
             TaxRatePercent = percent,
             TaxAmount = taxed.Tax
         };
-        db.JobLaborLines.Add(line);
-        await db.SaveChangesAsync(ct);
 
-        return new LaborLineDto(line.Id, line.Description, line.Hours, line.Rate, lineTotal,
-                line.TaxRatePercent, line.TaxAmount);
+        repository.AddLaborLine(line);
+        await repository.SaveChangesAsync(ct);
+        return line;
     }
 
+    // Resolves the parent job FIRST, then the line. JobPartLines has no global query
+    // filter, so the tenant check lives entirely in that parent lookup -- and the old
+    // order (line first, then a null-forgiving job lookup) turned a foreign job into a
+    // NullReferenceException and a bare 500 instead of a 404. Fixed here; it is the
+    // RemovePartAsync bug recorded in CLAUDE.md and finding 19 in review-findings.md.
     public async Task RemovePartAsync(Guid id, Guid lineId, CancellationToken ct)
     {
-        var line = await db.JobPartLines
-            .Include(l => l.InventoryItem)
-            .FirstOrDefaultAsync(l => l.Id == lineId && l.JobId == id, ct)
+        var job = await repository.FindAsync(id, ct)
+            ?? throw new NotFoundException("Job not found");
+
+        EnsureModifiable(job, "modify");
+
+        var line = await repository.FindPartLineAsync(id, lineId, ct)
             ?? throw new NotFoundException("Part line not found");
 
-        var job = await db.Jobs.FindAsync([id], ct)!;
-
-        if (job!.Status is JobStatus.Closed or JobStatus.Completed or JobStatus.Invoiced)
-            throw new ValidationException($"Cannot modify a {job.Status} job");
-
-        // Return stock
+        // Returning the stock and recording the reverse movement keeps the trail able to
+        // reconstruct the level from zero.
         line.InventoryItem.StockOnHand += (int)line.Quantity;
-        db.StockMovements.Add(new StockMovement
+        repository.AddStockMovement(new StockMovement
         {
-            BusinessId = job!.BusinessId,
+            BusinessId = job.BusinessId,
             InventoryItemId = line.InventoryItemId,
             QuantityDelta = (int)line.Quantity,
             Reason = StockMovementReason.JobReturn,
@@ -371,95 +272,87 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
             CreatedByUserId = currentUser.UserId
         });
 
-        db.JobPartLines.Remove(line);
-        await db.SaveChangesAsync(ct);
-        return;
+        repository.RemovePartLine(line);
+        await repository.SaveChangesAsync(ct);
     }
 
     public async Task RemoveLaborAsync(Guid id, Guid lineId, CancellationToken ct)
     {
-        var job = await db.Jobs.FindAsync([id], ct) ?? throw new NotFoundException("Job not found");
+        var job = await repository.FindAsync(id, ct)
+            ?? throw new NotFoundException("Job not found");
 
-        if (job.Status is JobStatus.Closed or JobStatus.Completed or JobStatus.Invoiced)
-            throw new ValidationException($"Cannot modify a {job.Status} job");
+        EnsureModifiable(job, "modify");
 
-        var line = await db.JobLaborLines.FirstOrDefaultAsync(l => l.Id == lineId && l.JobId == id, ct)
+        var line = await repository.FindLaborLineAsync(id, lineId, ct)
             ?? throw new NotFoundException("Labor line not found");
-        db.JobLaborLines.Remove(line);
-        await db.SaveChangesAsync(ct);
-        return;
+
+        repository.RemoveLaborLine(line);
+        await repository.SaveChangesAsync(ct);
     }
 
-    // Groups the job's tax by the rate each line was charged at, so an invoice can show
-    // "VAT 20% — £42.00" rather than one undifferentiated number. Where a rate carries
-    // jurisdiction components they ride along for display; the AMOUNT always comes from the
-    // line snapshots, never from re-summing component percentages, which would drift from
-    // what the customer was actually charged.
-    //
-    // Plain // rather than ///: Task-returning method with a generic return, which the
-    // .NET 10 preview OpenAPI comment generator mishandles. See CLAUDE.md.
-    private static async Task<List<TaxLineDto>> BuildTaxBreakdownAsync(AppDbContext db, Job job, CancellationToken ct)
+    // <summary>
+    // A job may be deleted outright only while it is still a Draft -- nothing has been
+    // worked, billed or booked against it, so there is no history to lose. Once it has
+    // been scheduled or beyond it is archived instead: labor and part lines are its own
+    // children and would cascade away with it, taking the record of what the customer was
+    // charged and why stock left the shelf.
+    // </summary>
+    public async Task DeleteAsync(Guid id, CancellationToken ct)
     {
-        var byRate = job.LaborLines
-            .Select(l => new { l.TaxRateId, l.TaxRatePercent, l.TaxAmount })
-            .Concat(job.PartLines.Select(p => new { p.TaxRateId, p.TaxRatePercent, p.TaxAmount }))
-            .Where(x => x.TaxAmount != 0m)
-            .GroupBy(x => new { x.TaxRateId, x.TaxRatePercent })
-            .ToList();
+        var job = await repository.FindAsync(id, ct)
+            ?? throw new NotFoundException("Job not found");
 
-        if (byRate.Count == 0) return [];
+        if (job.Status != JobStatus.Draft)
+            throw new ConflictException(
+                $"A {job.Status} job cannot be deleted because it carries billing and stock history. " +
+                "Archive it instead - it will be hidden from lists while its history stays intact.");
 
-        var rateIds = byRate.Select(g => g.Key.TaxRateId).OfType<Guid>().ToList();
+        Archiving.EnsureDeletable("job",
+            new Dependent("labour lines", await repository.CountLabourLinesAsync(id, ct)),
+            new Dependent("part lines", await repository.CountPartLinesAsync(id, ct)),
+            new Dependent("bookings", await repository.CountBookingsAsync(id, ct)));
 
-        // Deliberately does not filter on ArchivedAtUtc: a rate that has since been retired
-        // must still resolve, or a historical job loses the name of the tax it was charged.
-        var rates = await db.TaxRates
-            .Include(r => r.Components)
-            .Where(r => rateIds.Contains(r.Id))
-            .ToListAsync(ct);
-
-        return byRate.Select(g =>
-        {
-            var rate = rates.FirstOrDefault(r => r.Id == g.Key.TaxRateId);
-            var components = rate?.Components
-                .OrderBy(c => c.SortOrder)
-                .Select(c => new TaxComponentLineDto(c.Name, c.Rate))
-                ?? [];
-
-            return new TaxLineDto(
-                rate?.Name ?? "Tax",
-                g.Key.TaxRatePercent,
-                g.Sum(x => x.TaxAmount),
-                components);
-        }).ToList();
+        repository.RemoveJob(job);
+        await repository.SaveChangesAsync(ct);
     }
 
-    // Not a formatting nicety — an omitted zone check crossed tenants and then broke the
-    // calendar. CreateAsync and UpdateJobAsync validated CustomerId and VehicleId through
-    // the tenant-filtered DbSet but assigned AssignedZoneId with no lookup at all, so
-    // another business's zone GUID was accepted (the FK is satisfied at the database, and
-    // tenancy is never checked there). UpdateStatusAsync then auto-created a Booking on
-    // that foreign zone, and GetBookingsAsync projects b.Zone.Name unconditionally — the
-    // zone is filtered out for this tenant, so the projection dereferenced null and the
-    // whole calendar list 500'd. Reading through db.Zones applies the global query filter,
-    // so a foreign zone simply is not found. See docs/review-findings.md finding 2.
-    private static async Task EnsureZoneIsOursAsync(AppDbContext db, Guid? zoneId, CancellationToken ct)
+    public async Task<ArchiveResultDto> ArchiveAsync(Guid id, CancellationToken ct)
+    {
+        var job = await repository.FindAsync(id, ct) ?? throw new NotFoundException("Job not found");
+        var result = Archiving.Archive(job, id);
+        await repository.SaveChangesAsync(ct);
+        return result;
+    }
+
+    public async Task<ArchiveResultDto> UnarchiveAsync(Guid id, CancellationToken ct)
+    {
+        var job = await repository.FindAsync(id, ct) ?? throw new NotFoundException("Job not found");
+        var result = Archiving.Unarchive(job, id);
+        await repository.SaveChangesAsync(ct);
+        return result;
+    }
+
+    private static void EnsureModifiable(Job job, string verb)
+    {
+        if (job.Status is JobStatus.Closed or JobStatus.Completed or JobStatus.Invoiced)
+            throw new ValidationException($"Cannot {verb} a {job.Status} job");
+    }
+
+    // Not a formatting nicety -- an omitted zone check crossed tenants and then broke the
+    // calendar. Create and update validated CustomerId and VehicleId through the
+    // tenant-filtered DbSet but assigned AssignedZoneId with no lookup at all, so another
+    // business's zone GUID was accepted (the FK is satisfied at the database, and tenancy
+    // is never checked there). UpdateStatusAsync then auto-created a Booking on that
+    // foreign zone, and the calendar list projects b.Zone.Name unconditionally -- the zone
+    // is filtered out for this tenant, so the projection dereferenced null and the whole
+    // calendar 500'd. See finding 2 in docs/review-findings.md.
+    private async Task EnsureZoneIsOursAsync(Guid? zoneId, CancellationToken ct)
     {
         if (!zoneId.HasValue) return;
 
-        var exists = await db.Zones.AnyAsync(z => z.Id == zoneId.Value, ct);
-        if (!exists) throw new NotFoundException("Zone not found");
+        if (!await repository.ZoneExistsAsync(zoneId.Value, ct))
+            throw new NotFoundException("Zone not found");
     }
-
-    /// <summary>
-    /// Jobs and bookings cross-link with two independent nullable FKs and nothing keeps
-    /// them consistent, so both directions have to be checked. Extracted because the same
-    /// lookup appears in UpdateJobAsync.
-    /// </summary>
-    private static async Task<Booking?> FindLinkedBookingAsync(AppDbContext db, Job job, CancellationToken ct)
-=> job.BookingId.HasValue
-            ? await db.Bookings.FindAsync([job.BookingId.Value], ct)
-            : await db.Bookings.FirstOrDefaultAsync(b => b.JobId == job.Id, ct);
 
     /// <summary>
     /// Mirrors a job's new status onto its calendar booking. Three cases, and the third is
@@ -470,7 +363,7 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
     /// Synchronous, and takes the already-loaded booking, so the decision table stays
     /// readable next to the I/O rather than interleaved with it.
     /// </summary>
-    private static void SyncBookingToJobStatus(AppDbContext db, Job job, Booking? booking, JobStatus newStatus, Guid? userId)
+    private void SyncBookingToJobStatus(Job job, Booking? booking, JobStatus newStatus)
     {
         switch (newStatus)
         {
@@ -487,12 +380,12 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
 
             case JobStatus.Scheduled:
             case JobStatus.InProgress:
-                ReviveOrCreateBooking(db, job, booking, userId);
+                ReviveOrCreateBooking(job, booking);
                 break;
         }
     }
 
-    private static void ReviveOrCreateBooking(AppDbContext db, Job job, Booking? booking, Guid? userId)
+    private void ReviveOrCreateBooking(Job job, Booking? booking)
     {
         var isScheduled = job.ScheduledStartUtc.HasValue && job.ScheduledEndUtc.HasValue;
 
@@ -520,31 +413,62 @@ public class JobService(AppDbContext db, CurrentUserService currentUser) : IJobS
             StartUtc = job.ScheduledStartUtc!.Value,
             EndUtc = job.ScheduledEndUtc!.Value,
             Status = BookingStatus.Confirmed,
-            CreatedByUserId = userId
+            CreatedByUserId = currentUser.UserId
         };
 
-        db.Bookings.Add(created);
+        repository.AddBooking(created);
         created.JobId = job.Id;
         job.BookingId = created.Id;
+    }
+
+    // Groups the job's tax by the rate each line was charged at. Where a rate carries
+    // jurisdiction components they ride along for display; the AMOUNT always comes from the
+    // line snapshots, never from re-summing component percentages, which would drift from
+    // what the customer was actually charged.
+    //
+    // Plain // rather than ///: Task-returning method with a generic return, which the
+    // .NET 10 preview OpenAPI comment generator mishandles. See CLAUDE.md.
+    private async Task<List<JobTaxGroup>> BuildTaxBreakdownAsync(Job job, CancellationToken ct)
+    {
+        var byRate = job.LaborLines
+            .Select(l => new { l.TaxRateId, l.TaxRatePercent, l.TaxAmount })
+            .Concat(job.PartLines.Select(p => new { p.TaxRateId, p.TaxRatePercent, p.TaxAmount }))
+            .Where(x => x.TaxAmount != 0m)
+            .GroupBy(x => new { x.TaxRateId, x.TaxRatePercent })
+            .ToList();
+
+        if (byRate.Count == 0) return [];
+
+        var rateIds = byRate.Select(g => g.Key.TaxRateId).OfType<Guid>().ToList();
+        var rates = await repository.GetTaxRatesWithComponentsAsync(rateIds, ct);
+
+        return byRate.Select(g =>
+        {
+            var rate = rates.FirstOrDefault(r => r.Id == g.Key.TaxRateId);
+            var components = rate?.Components.OrderBy(c => c.SortOrder).ToList() ?? [];
+
+            return new JobTaxGroup(
+                rate?.Name ?? "Tax",
+                g.Key.TaxRatePercent,
+                g.Sum(x => x.TaxAmount),
+                components);
+        }).ToList();
     }
 
     /// <summary>
     /// Picks the rate a new line is raised at, and snapshots it.
     ///
-    /// Returns nothing when the customer is exempt or no rate is mapped to the category —
+    /// Returns nothing when the customer is exempt or no rate is mapped to the category --
     /// a US shop with no labour mapping is stating that labour is not taxable there, which
     /// is a real answer rather than a missing setting.
     /// </summary>
-    private static async Task<(Guid? RateId, decimal Percent)> ResolveTaxRateAsync(AppDbContext db, Guid customerId, TaxCategory category, CancellationToken ct)
+    private async Task<(Guid? RateId, decimal Percent)> ResolveTaxRateAsync(
+        Guid customerId, TaxCategory category, CancellationToken ct)
     {
-        var customer = await db.Customers.FindAsync([customerId], ct);
+        var customer = await repository.FindCustomerAsync(customerId, ct);
         if (customer is { IsTaxExempt: true }) return (null, 0m);
 
-        var mapping = await db.TaxRateCategories
-            .Include(m => m.TaxRate)
-            .Where(m => m.Category == category && m.TaxRate.ArchivedAtUtc == null)
-            .FirstOrDefaultAsync(ct);
-
+        var mapping = await repository.FindActiveTaxMappingAsync(category, ct);
         return mapping is null ? (null, 0m) : (mapping.TaxRateId, mapping.TaxRate.Rate);
     }
 }

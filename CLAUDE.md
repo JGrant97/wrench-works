@@ -160,60 +160,147 @@ Pages and layouts stay server components. Add `"use client"` only where you genu
 ### 5. Vertical slices on the API
 
 Everything a feature needs lives in one folder under `src/WrenchWorks.Api/Features/<Feature>/`.
-Restructured 1 Sep 2026 — the layout is now four parts, and `Features/Zones/` is the
-reference shape because it is small enough to read in one go:
+Restructured 1 Sep 2026 into **three layers plus its data**. All 17 existing slices follow
+it and **every new one must too** — if you are adding a feature, jump to *Adding a new
+slice* at the end of this rule and copy `Features/Zones/`, which is the reference shape
+because it is small enough to read in one go:
 
 ```
 Features/Zones/
-  Dtos/                 one file per record   (CreateZoneRequest, UpdateZoneRequest, ZoneDto)
-  Validators/           one file per validator (CreateZoneValidator, UpdateZoneValidator)
-  IZoneService.cs       what the slice does
-  ZoneService.cs        how it does it        (holds AppDbContext and the domain logic)
-  ZoneEndpoints.cs      Map() + thin handlers (holds nothing but HTTP)
+  Api/                     the HTTP layer, and the only folder that knows about HTTP
+    ZoneEndpoints.cs         routes only, no methods
+    IZoneEndpointHandler.cs
+    ZoneEndpointHandler.cs   the ONLY place an entity becomes a DTO
+  Dtos/                    one file per record    (CreateZoneRequest, UpdateZoneRequest, ZoneDto)
+  Validators/              one file per validator (CreateZoneValidator, UpdateZoneValidator)
+  IZoneService.cs
+  ZoneService.cs           business rules -- returns ENTITIES, throws on failure
+  IZoneRepository.cs
+  ZoneRepository.cs        data access -- the only thing holding AppDbContext
 ```
 
-- No controllers. **A per-slice service is the rule, not a shared cross-feature service
-  layer** — `IZoneService` lives in `Features/Zones/` and is used by nothing outside it,
-  so the slice boundary is unchanged. There is still no `Services/` folder at the root and
-  no service used by two slices.
-- **The endpoint is the HTTP shell; the service is everything else.** Handlers do one
-  thing: call the service and wrap the result. Anything that touches the database,
-  validates, or decides business rules belongs in the service.
-- **Service methods return DTOs, never `IResult`.** Failures throw the exception types in
-  `ErrorHandlingMiddleware`, so the service never mentions a status code. The two auth
-  endpoints are the deliberate exception: a failed login is a valid answer rather than an
-  error, so `ILoginService` returns a `LoginOutcome` and `LoginEndpoint` maps it to
-  401/403/200. Reach for that only when the status really is part of the contract.
+The rule in one line: **routes -> handler -> service -> repository -> EF**, and a DTO
+exists only in the handler.
+
+```csharp
+group.MapGet("/",
+    (IZoneEndpointHandler handler, CancellationToken ct) => handler.ListAsync(ct))
+    .RequireAuthorization("calendar.view");
+```
+
+- **The lambda must invoke, not reference.** `(IZoneEndpointHandler h) => h.ListAsync` is a
+  method group: minimal APIs would try to serialise the delegate instead of calling it.
+  Write `=> h.ListAsync(ct)`.
+- **`Api/<Feature>Endpoints.cs` contains `Map` and nothing else.** No private handlers, no
+  helpers. If you are about to add a method there, it belongs in the handler.
+- **Folders do not change namespaces.** `Api/`, `Dtos/` and `Validators/` files all stay in
+  `WrenchWorks.Api.Features.<Feature>`, so moving a file between them is a pure move with
+  no `using` churn.
+- **Only the handler builds DTOs.** The service and repository speak in entities, so a
+  change to the wire shape touches exactly one file per slice.
+- **Only the repository touches `AppDbContext`.** Services take `I<Feature>Repository`.
+  Nothing outside a repository has a `DbSet`.
+- Failures are **thrown**, never returned: the `ErrorHandlingMiddleware` exception types
+  map to status codes, so services never mention one. The two auth endpoints are the
+  deliberate exception -- a failed login is a valid answer rather than an error, so
+  `ILoginService` returns a `LoginOutcome` and the handler maps it to 401/403/200.
 - Register each new slice **twice**: `<Feature>Endpoints.Map(app);` in the "Map Feature
-  Endpoints" block of `Program.cs`, and `services.AddScoped<I…Service, …Service>();` in
+  Endpoints" block of `Program.cs`, and the **three** `AddScoped` lines in
   `Features/Common/FeatureServices.cs`. Nothing is discovered by convention, so a missing
   registration throws on the first request rather than degrading silently.
-- Group routes with `app.MapGroup("/api/<feature>").WithTags("<Feature>").RequireAuthorization()`;
-  the tag drives Orval's `tags-split` output folder, so keep it stable and meaningful.
-- Handlers return a **concrete `TypedResults` type** — `Task<Ok<JobDetailDto>>`,
-  `Task<Created<ZoneDto>>`, `Task<NoContent>` — take `I<Feature>Service` and a
-  `CancellationToken`. Never `Task<IResult>`: it erases the response type, which is what
-  produced the `apiClient<void>` problem below. Where an endpoint genuinely has more than
-  one success-or-auth status, use a union
-  (`Results<Ok<LoginResponse>, UnauthorizedHttpResult, ProblemHttpResult>`) rather than
-  falling back to `IResult`.
-- Validators live in `Validators/` and are still picked up by
-  `AddValidatorsFromAssemblyContaining<Program>()`; services call
-  `ValidateAndThrowAsync` themselves, as the handlers used to.
+- Handlers return a **concrete `TypedResults` type** -- `Task<Ok<JobDetailDto>>`,
+  `Task<Created<ZoneDto>>`, `Task<NoContent>`. Never `Task<IResult>`: it erases the
+  response type, which is what produced the `apiClient<void>` problem below. Where an
+  endpoint genuinely has more than one success-or-auth status, use a union
+  (`Results<Ok<LoginResponse>, UnauthorizedHttpResult, ProblemHttpResult>`).
+- Validators live in `Validators/`, are still picked up by
+  `AddValidatorsFromAssemblyContaining<Program>()`, and are called by the **service**.
 - `Features/Common/` is the exception to all of the above: `Archiving`, `PagedResult` and
-  `TaxCalculator` are shared helpers, already one purpose per file, and deliberately have
-  no `Dtos/` split.
+  `TaxCalculator` are shared helpers with no slice of their own. `ArchiveResultDto` comes
+  back from `Archiving.Archive` and is the one DTO a service returns, deliberately.
 
-**Two traps this restructure exposed**, both worth knowing before touching the layout again:
+#### When a repository may not return entities
 
-- **A `Task`-returning service method cannot carry an XML doc comment.** The .NET 10
-  OpenAPI XML-comment source generator emits `System.Void` for it and the build fails with
-  `CS0673` in generated code you never wrote. `Task<T>` is fine. Seven `///` comments on
-  `DeleteAsync`-style methods had to become plain `//`. Same trap as the one already
-  recorded for `CalendarEndpoints`/`VehicleEndpoints`.
-- **A required parameter cannot follow an optional one**, so the injected
-  `I<Feature>Service` goes **first** in a handler signature, before `int page = 1`. Minimal
-  APIs bind by type and name rather than position, so first is always safe.
+"Return entities" breaks down where the query is an aggregate or a narrow projection.
+Loading whole graphs just to count or sum them would be a real regression, so in those
+cases **the repository returns a read model** -- a domain-shaped record that is still not
+the API DTO, and the handler maps it the same as any entity. Examples in the code:
+
+| Read model | Why |
+|---|---|
+| `CustomerWithVehicleCount` | the entity plus a SQL `COUNT`, so the list never touches `Vehicles` |
+| `TodaysBookingRow`, `ActiveJobRow`, `StatusCountRow`, `LowStockRow` | the whole dashboard is aggregates |
+| `VehicleHistoryRow`, `CustomerRecentJob` | line-item totals summed in the database |
+| `VariantYearRange` | two ints per variant instead of the variant |
+
+Read models keep enums as **enums**; turning them into display strings is the handler's job.
+
+**Three traps this restructure exposed**, all worth knowing before touching the layout:
+
+- **A `Task`-returning method cannot carry an XML doc comment.** The .NET 10 OpenAPI
+  XML-comment source generator emits `System.Void` for it and the build fails with
+  `CS0673` in generated code you never wrote. `Task<T>` is fine. Use plain `//` on
+  `DeleteAsync`-style methods.
+- **A required parameter cannot follow an optional one**, so the injected handler goes
+  **first** in a lambda, before `int page = 1`. Minimal APIs bind by type and name rather
+  than position, so first is always safe.
+- **Keep the defaults on optional query parameters.** A required `bool includeArchived`
+  that fails to bind throws `BadHttpRequestException`, which `ErrorHandlingMiddleware`
+  catches and reports as a **500** rather than a 400. Dropping `= false` from
+  `GET /api/tax/rates` broke two tests exactly this way.
+
+
+#### Adding a new slice — follow this exactly
+
+**Every new feature uses this layout. There are no exceptions in the codebase and new work
+should not create one.** The fastest correct route is to copy `Features/Zones/` and rename
+— it is the reference slice for this reason. Nine files, in this order:
+
+| # | File | Holds |
+|---|---|---|
+| 1 | `Dtos/*.cs` | one record per file: requests and responses |
+| 2 | `Validators/*.cs` | one `AbstractValidator<T>` per file |
+| 3 | `I<Feature>Repository.cs` | data access signatures, returning entities |
+| 4 | `<Feature>Repository.cs` | the only class with `AppDbContext` |
+| 5 | `I<Feature>Service.cs` | business-rule signatures, returning entities |
+| 6 | `<Feature>Service.cs` | validation, rules, throws; takes the repository |
+| 7 | `Api/I<Feature>EndpointHandler.cs` | `TypedResults` signatures |
+| 8 | `Api/<Feature>EndpointHandler.cs` | entity → DTO; takes the service |
+| 9 | `Api/<Feature>Endpoints.cs` | `Map` only |
+
+Then **three registrations** and **one test file**:
+
+```csharp
+// Program.cs, in the "Map Feature Endpoints" block
+WidgetEndpoints.Map(app);
+
+// Features/Common/FeatureServices.cs, one line each, handler -> service -> repository
+services.AddScoped<IWidgetEndpointHandler, WidgetEndpointHandler>();
+services.AddScoped<IWidgetService, WidgetService>();
+services.AddScoped<IWidgetRepository, WidgetRepository>();
+```
+
+Nothing is discovered by convention, so a missed registration throws on the slice's first
+request rather than at startup — which is why rule 6 (an integration test per endpoint) is
+what actually catches it.
+
+If the entity is tenant-scoped, it must also inherit `BusinessScopedEntity`, get an EF
+configuration, **and** be added to the explicit `HasQueryFilter` list in
+`AppDbContext.OnModelCreating` — see "Things to know before touching the code". A new
+entity has no tenant isolation until that line exists.
+
+**Self-check before calling a slice done.** Both of these must print nothing:
+
+```bash
+grep -rn "private static" src/WrenchWorks.Api/Features --include=*Endpoints.cs --include=*Endpoint.cs
+```
+
+```bash
+grep -rl "AppDbContext" src/WrenchWorks.Api/Features | grep -v "Repository.cs"
+```
+
+The first proves the endpoints class is routes-only; the second proves nothing outside a
+repository holds a `DbSet`. Both were clean as of 1 Sep 2026 across all 17 slices.
 
 ### 6. Every new endpoint gets an integration test
 
@@ -311,7 +398,7 @@ Verified against the code — these are the places where the codebase and the ru
 
 The job line-item endpoints load lines from those unfiltered sets and rely on a separate `db.Jobs.FindAsync(id)` for the tenant check. **Verified safe** by `TenantIsolationTests` — `FindAsync` does honour the global query filter, so a cross-tenant read, delete, or append all return 404 and leave the data untouched. The isolation is real but *indirect*: it lives in that parent lookup, not in the line entity. If you refactor those handlers, keep the parent-job check, and keep those tests green.
 
-**`RemovePartAsync` null-handling bug.** It does `db.Jobs.FindAsync([id], ct)!` then dereferences `job!.Status`. A missing or filtered-out job gives a `NullReferenceException` → `500 internal_error` instead of a 404. `RemoveLaborAsync` two methods below handles the same case correctly with `?? throw new NotFoundException(...)`.
+**FIXED 1 Sep 2026 — `RemovePartAsync` null-handling bug.** It did `db.Jobs.FindAsync([id], ct)!` then dereferenced `job!.Status`, so a missing or filtered-out job gave a `NullReferenceException` → `500 internal_error` instead of a 404, while `RemoveLaborAsync` handled the same case correctly. The repository split forced the two to be written side by side and the asymmetry became obvious: `JobService.RemovePartAsync` now resolves the parent job **first** (which is where the tenant check lives, since `JobPartLines` has no query filter) and then the line, exactly as `RemoveLaborAsync` does. Also closes the existence-oracle half of finding 19.
 
 **Known-vulnerable packages.** The build reports `NU1903` high-severity advisories for `Microsoft.OpenApi` 2.0.0-preview.11 and `Microsoft.Build.Tasks.Core` 17.7.2. Also `NU1603`: `Infrastructure` asks for EF Core `10.0.0-preview.3.25171.7`, which does not exist on the feed, so NuGet silently resolves `preview.4.25258.110` instead — the pinned versions are not the versions you get.
 

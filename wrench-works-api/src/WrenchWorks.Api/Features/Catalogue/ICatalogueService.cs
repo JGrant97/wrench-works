@@ -1,14 +1,17 @@
+using WrenchWorks.Domain.Entities;
+
 namespace WrenchWorks.Api.Features.Catalogue;
 
-// The Catalogue slice behind an interface: the endpoints become a thin HTTP shell.
-// Methods return DTOs, not IResult -- failures are thrown and mapped by
-// ErrorHandlingMiddleware, so nothing here needs to know about status codes.
+/// <summary>
+/// The cascade rules: each step verifies its parent exists and returns only options that
+/// still lead to a real vehicle. Returns entities; CatalogueEndpointHandler maps to DTOs.
+/// </summary>
 public interface ICatalogueService
 {
-    Task<List<CatalogueMakeDto>> GetMakesAsync(CancellationToken ct);
-    Task<List<CatalogueModelDto>> GetModelsAsync(Guid makeId, CancellationToken ct);
+    Task<List<VehicleMake>> GetMakesAsync(CancellationToken ct);
+    Task<List<VehicleModel>> GetModelsAsync(Guid makeId, CancellationToken ct);
     Task<List<int>> GetYearsAsync(Guid modelId, CancellationToken ct);
-    Task<List<CatalogueVariantDto>> GetVariantsAsync(Guid modelId, int? year, CancellationToken ct);
-    Task<CatalogueVariantDetailDto> GetVariantAsync(Guid variantId, CancellationToken ct);
-    Task<List<CatalogueColourDto>> GetColoursAsync(CancellationToken ct);
+    Task<List<VehicleVariant>> GetVariantsAsync(Guid modelId, int? year, CancellationToken ct);
+    Task<VehicleVariant> GetVariantAsync(Guid variantId, CancellationToken ct);
+    Task<List<VehicleColour>> GetColoursAsync(CancellationToken ct);
 }

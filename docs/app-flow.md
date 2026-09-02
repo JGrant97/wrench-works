@@ -25,9 +25,13 @@ Next.js route handler  /api/[...path]/route.ts
 .NET API  http://localhost:5000/api/jobs
    │  JWT validated → CurrentUserService → ITenantProvider
    ▼
-JobEndpoints.ListAsync            ← thin: calls the service, wraps in TypedResults
+JobEndpoints.Map                  ← routes only; the lambda resolves the handler from DI
    ▼
-IJobService → JobService          ← the actual work; returns a DTO, throws on failure
+IJobEndpointHandler               ← the ONLY place an entity becomes a DTO
+   ▼
+IJobService                       ← business rules; returns entities, throws on failure
+   ▼
+IJobRepository                    ← the only thing holding AppDbContext
    │  EF global query filter injects BusinessId
    ▼
 PostgreSQL
@@ -35,12 +39,16 @@ PostgreSQL
 
 Key points:
 
-- **Endpoints hold no logic.** Since 1 Sep 2026 every slice has an `I<Feature>Service`
-  registered in `Features/Common/FeatureServices.cs`; the handler injects it, calls one
-  method and wraps the result. DTOs and validators live in `Dtos/` and `Validators/`
-  beside it. See rule 5 in CLAUDE.md for the layout and the two traps it exposed.
-  *Verified*: the OpenAPI document is byte-identical before and after the move — same 78
-  endpoints, same statuses, same schemas — so this changed no contract.
+- **Endpoints hold no logic — they hold no methods at all.** Since 1 Sep 2026 every slice
+  is four parts: `<Feature>Endpoints` maps routes to an injected `I<Feature>EndpointHandler`,
+  which converts to DTOs; `I<Feature>Service` holds the business rules and returns
+  entities; `I<Feature>Repository` is the only thing that touches `AppDbContext`. All three
+  are registered in `Features/Common/FeatureServices.cs`. DTOs and validators sit in
+  `Dtos/` and `Validators/`. See rule 5 in CLAUDE.md, including when a repository is
+  allowed to return a read model instead of an entity.
+  *Verified*: the OpenAPI document is byte-identical across both restructures — same 78
+  endpoints, same statuses, same schemas — so neither changed a contract. Endpoint files
+  are now 12–75 lines and contain zero private methods.
 
 - **The browser never sees the JWT.** It lives in the `ww_token` httpOnly cookie. The proxy is what turns a cookie into a bearer token, which is why the frontend can't call `:5000` directly.
 - **Paths are 1:1.** `proxy()` forwards `url.pathname` unchanged, so `/api/jobs` on the web maps to `/api/jobs` on the API. The only reason the catch-all exists is the cookie→bearer hop.

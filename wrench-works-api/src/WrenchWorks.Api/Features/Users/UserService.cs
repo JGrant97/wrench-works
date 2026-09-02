@@ -1,64 +1,41 @@
 using FluentValidation;
-using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
 using WrenchWorks.Api.Middleware;
 using WrenchWorks.Domain.Entities;
-using WrenchWorks.Infrastructure.Persistence;
 using WrenchWorks.Infrastructure.Services;
 
 namespace WrenchWorks.Api.Features.Users;
 
-public class UserService(AppDbContext db, CurrentUserService currentUser, IEmailSender emailSender) : IUserService
+public class UserService(
+    IUserRepository repository,
+    CurrentUserService currentUser,
+    IEmailSender emailSender) : IUserService
 {
-    public async Task<List<UserListItemDto>> ListAsync(CancellationToken ct)
-    {
-        var users = await db.BusinessUsers
-            .Include(bu => bu.User)
-            .Include(bu => bu.Roles).ThenInclude(r => r.Role)
-            .OrderBy(bu => bu.User.Name)
-            .Select(bu => new UserListItemDto(
-                bu.UserId, bu.Id, bu.User.Name, bu.User.Email, bu.Status.ToString(),
-                bu.Roles.Select(r => r.Role.Name), bu.CreatedAtUtc))
-            .ToListAsync(ct);
+    public Task<List<BusinessUser>> ListAsync(CancellationToken ct) => repository.ListMembersAsync(ct);
 
-        return users;
-    }
-
-    public async Task<InvitedUserDto> InviteAsync(InviteUserRequest request, CancellationToken ct)
+    public async Task<BusinessUser> InviteAsync(InviteUserRequest request, CancellationToken ct)
     {
         await new InviteUserValidator().ValidateAndThrowAsync(request, ct);
 
         var businessId = currentUser.RequireBusinessId();
 
-        // Check user limit
-        var sub = await db.BusinessSubscriptions.FirstOrDefaultAsync(s => s.BusinessId == businessId, ct);
-        if (sub != null)
+        var subscription = await repository.GetSubscriptionAsync(businessId, ct);
+        if (subscription != null)
         {
-            var currentCount = await db.BusinessUsers.CountAsync(ct);
-            if (currentCount >= sub.UserLimit)
-                throw new LimitReachedException($"User limit of {sub.UserLimit} reached for your plan");
+            var memberCount = await repository.CountMembersAsync(ct);
+            if (memberCount >= subscription.UserLimit)
+                throw new LimitReachedException($"User limit of {subscription.UserLimit} reached for your plan");
         }
 
-        // Check role exists
-        var role = await db.Roles.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => r.BusinessId == businessId && r.Name == request.RoleName, ct)
+        var role = await repository.FindRoleAsync(businessId, request.RoleName, ct)
             ?? throw new NotFoundException($"Role '{request.RoleName}' not found");
 
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-        var existingUser = await db.Users.FirstOrDefaultAsync(u => u.NormalizedEmail == normalizedEmail, ct);
+        var existingUser = await repository.FindUserByNormalizedEmailAsync(normalizedEmail, ct);
 
-        if (existingUser != null)
-        {
-            // Check if already a member of this business
-            var existingMembership = await db.BusinessUsers
-                .IgnoreQueryFilters()
-                .AnyAsync(bu => bu.UserId == existingUser.Id && bu.BusinessId == businessId, ct);
-            if (existingMembership)
-                throw new ConflictException("User is already a member of this business");
-        }
+        if (existingUser != null && await repository.MembershipExistsAsync(existingUser.Id, businessId, ct))
+            throw new ConflictException("User is already a member of this business");
 
-        // Create user if doesn't exist
         var tempPassword = Guid.NewGuid().ToString("N")[..12];
         var user = existingUser ?? new User
         {
@@ -70,48 +47,39 @@ public class UserService(AppDbContext db, CurrentUserService currentUser, IEmail
             EmailVerificationToken = Guid.NewGuid().ToString("N"),
             EmailVerificationTokenExpiresUtc = DateTime.UtcNow.AddDays(7)
         };
-        if (existingUser == null) db.Users.Add(user);
+        if (existingUser == null) repository.AddUser(user);
 
-        // Create business user membership
-        var businessUser = new BusinessUser
+        var membership = new BusinessUser
         {
             UserId = user.Id,
             BusinessId = businessId,
-            Status = BusinessUserStatus.Pending
+            Status = BusinessUserStatus.Pending,
+            // Set so the handler can read the invitee's name and email without re-querying.
+            User = user
         };
-        db.BusinessUsers.Add(businessUser);
-        await db.SaveChangesAsync(ct);
+        repository.AddMembership(membership);
+        await repository.SaveChangesAsync(ct);
 
-        // Assign role
-        db.BusinessUserRoles.Add(new BusinessUserRole { BusinessUserId = businessUser.Id, RoleId = role.Id });
-        await db.SaveChangesAsync(ct);
+        repository.AddRoleAssignment(new BusinessUserRole { BusinessUserId = membership.Id, RoleId = role.Id });
+        await repository.SaveChangesAsync(ct);
 
-        // Send invite email
+        // The membership is created Pending; VerifyEmailService activates it, which is why
+        // the invite carries both the temporary password and the verification token.
         await emailSender.SendAsync(user.Email, "You're invited to Wrench Works",
             $"<p>Hi {user.Name},</p><p>You've been invited to join a workshop on Wrench Works.</p>" +
             (existingUser == null ? $"<p>Your temporary password: <strong>{tempPassword}</strong></p>" : "") +
             $"<p>Verify your email with token: <strong>{user.EmailVerificationToken}</strong></p>",
             ct);
 
-        return new InvitedUserDto(businessUser.Id, user.Name, user.Email, "Pending");
+        return membership;
     }
 
-    public async Task<CurrentUserDto> GetMeAsync(CancellationToken ct)
+    public async Task<CurrentUserProfile> GetMeAsync(CancellationToken ct)
     {
-        var userId = currentUser.RequireUserId();
-        var businessId = currentUser.RequireBusinessId();
+        var membership = await repository.FindMembershipAsync(
+            currentUser.RequireUserId(), currentUser.RequireBusinessId(), ct)
+            ?? throw new NotFoundException("Membership not found");
 
-        var bu = await db.BusinessUsers
-            .IgnoreQueryFilters()
-            .Include(b => b.User)
-            .Include(b => b.Business)
-            .Include(b => b.Roles).ThenInclude(r => r.Role)
-            .FirstOrDefaultAsync(b => b.UserId == userId && b.BusinessId == businessId, ct);
-
-        if (bu == null) throw new NotFoundException("Membership not found");
-
-        return new CurrentUserDto(
-            bu.UserId, bu.User.Name, bu.User.Email, bu.BusinessId, bu.Business.Name,
-            bu.Roles.Select(r => r.Role.Name), currentUser.Permissions);
+        return new CurrentUserProfile(membership, currentUser.Permissions);
     }
 }

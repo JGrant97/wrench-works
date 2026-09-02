@@ -1,55 +1,45 @@
-using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
 using WrenchWorks.Api.Middleware;
-using WrenchWorks.Infrastructure.Persistence;
+using WrenchWorks.Domain.Entities;
 using WrenchWorks.Infrastructure.Stripe;
 
 namespace WrenchWorks.Api.Features.Billing;
 
 public class BillingService(
-    AppDbContext db,
+    IBillingRepository repository,
     CurrentUserService currentUser,
     IStripeService stripeService,
     IConfiguration config) : IBillingService
 {
-    public async Task<SubscriptionDto> GetSubscriptionAsync(CancellationToken ct)
+    public async Task<BusinessSubscription> GetSubscriptionAsync(CancellationToken ct) =>
+        await repository.GetSubscriptionAsync(currentUser.RequireBusinessId(), ct)
+            ?? throw new NotFoundException("No subscription found for this business");
+
+    public async Task<string> CreateCheckoutUrlAsync(CreateCheckoutRequest request, CancellationToken ct)
     {
         var businessId = currentUser.RequireBusinessId();
-        var sub = await db.BusinessSubscriptions.FirstOrDefaultAsync(s => s.BusinessId == businessId, ct);
-        if (sub == null) throw new NotFoundException("No subscription found for this business");
-
-        return new SubscriptionDto(sub.Plan, sub.Status.ToString(), sub.CurrentPeriodEndUtc,
-            sub.UserLimit, sub.ZoneLimit, sub.InventoryEnabled, sub.MessagingEnabled);
-    }
-
-    public async Task<CheckoutUrlDto> CreateCheckoutAsync(CreateCheckoutRequest request, CancellationToken ct)
-    {
-        var businessId = currentUser.RequireBusinessId();
-        var url = await stripeService.CreateCheckoutSessionAsync(
+        return await stripeService.CreateCheckoutSessionAsync(
             businessId, request.Plan, request.SuccessUrl, request.CancelUrl, ct);
-        return new CheckoutUrlDto(url);
     }
 
-    public async Task<CheckoutUrlDto> CreatePortalAsync(CancellationToken ct)
+    public async Task<string> CreatePortalUrlAsync(CancellationToken ct)
     {
-        var businessId = currentUser.RequireBusinessId();
-        var sub = await db.BusinessSubscriptions.FirstOrDefaultAsync(s => s.BusinessId == businessId, ct)
+        var subscription = await repository.GetSubscriptionAsync(currentUser.RequireBusinessId(), ct)
             ?? throw new NotFoundException("No subscription found");
 
-        if (string.IsNullOrEmpty(sub.StripeCustomerId))
+        if (string.IsNullOrEmpty(subscription.StripeCustomerId))
             throw new ConflictException("No Stripe customer linked");
 
-        var url = await stripeService.CreateCustomerPortalSessionAsync(
-            sub.StripeCustomerId, "http://localhost:3000/settings/billing", ct);
-        return new CheckoutUrlDto(url);
+        return await stripeService.CreateCustomerPortalSessionAsync(
+            subscription.StripeCustomerId, "http://localhost:3000/settings/billing", ct);
     }
 
-    public Task<WebhookAckDto> HandleWebhookAsync(string rawBody, CancellationToken ct)
+    public Task HandleWebhookAsync(string rawBody, CancellationToken ct)
     {
-        // TODO: Verify Stripe signature using config["Stripe:WebhookSecret"] against rawBody.
-        // This endpoint is AllowAnonymous, so until that lands anyone can post to it --
-        // see finding 11 in docs/review-findings.md. StripeService is stubbed, so there is
-        // nothing to forge into yet; that stops being true the moment it is implemented.
+        // TODO: Verify the Stripe signature using config["Stripe:WebhookSecret"] against
+        // rawBody. This endpoint is AllowAnonymous, so until that lands anyone can post to
+        // it -- finding 11 in docs/review-findings.md. StripeService is stubbed, so there
+        // is nothing to forge into yet; that stops being true the moment it is implemented.
         _ = config;
         _ = rawBody;
 
@@ -59,9 +49,8 @@ public class BillingService(
         // - customer.subscription.deleted -> mark cancelled
         // - invoice.payment_succeeded -> update status to Active
         // - invoice.payment_failed -> update status to PastDue
+        // Idempotency: check the event ID has not been processed before.
 
-        // Idempotency: check event ID hasn't been processed before
-
-        return Task.FromResult(new WebhookAckDto(true));
+        return Task.CompletedTask;
     }
 }

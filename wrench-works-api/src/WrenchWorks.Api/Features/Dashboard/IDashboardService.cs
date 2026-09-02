@@ -1,9 +1,19 @@
 namespace WrenchWorks.Api.Features.Dashboard;
 
-// The Dashboard slice behind an interface: the endpoints become a thin HTTP shell.
-// Methods return DTOs, not IResult -- failures are thrown and mapped by
-// ErrorHandlingMiddleware, so nothing here needs to know about status codes.
+// Everything the dashboard shows, in domain terms. The handler turns this into DashboardDto.
+public record DashboardSnapshot(
+    List<TodaysBookingRow> TodaysBookings,
+    List<ActiveJobRow> ActiveJobs,
+    List<StatusCountRow> JobsByStatus,
+    List<LowStockRow> LowStock,
+    int OpenJobCount,
+    int UnscheduledCount,
+    decimal RevenueThisMonth,
+    decimal RevenueLastMonth,
+    int CustomerCount,
+    int VehicleCount);
+
 public interface IDashboardService
 {
-    Task<DashboardDto> GetAsync(CancellationToken ct);
+    Task<DashboardSnapshot> GetAsync(CancellationToken ct);
 }

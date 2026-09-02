@@ -1,74 +1,64 @@
 using FluentValidation;
-using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
 using WrenchWorks.Api.Features.Common;
 using WrenchWorks.Api.Middleware;
 using WrenchWorks.Domain.Entities;
-using WrenchWorks.Infrastructure.Persistence;
 
 namespace WrenchWorks.Api.Features.Zones;
 
-public class ZoneService(AppDbContext db, CurrentUserService currentUser) : IZoneService
+public class ZoneService(IZoneRepository repository, CurrentUserService currentUser) : IZoneService
 {
-    private static ZoneDto ToDto(Zone z) =>
-        new(z.Id, z.Name, z.Color, z.Capacity, z.IsActive, z.CreatedAtUtc);
+    public Task<List<Zone>> ListAsync(CancellationToken ct) => repository.ListAsync(ct);
 
-    public async Task<List<ZoneDto>> ListAsync(CancellationToken ct) =>
-        await db.Zones
-            .OrderBy(z => z.Name)
-            .Select(z => new ZoneDto(z.Id, z.Name, z.Color, z.Capacity, z.IsActive, z.CreatedAtUtc))
-            .ToListAsync(ct);
-
-    public async Task<ZoneDto> CreateAsync(CreateZoneRequest request, CancellationToken ct)
+    public async Task<Zone> CreateAsync(CreateZoneRequest request, CancellationToken ct)
     {
         await new CreateZoneValidator().ValidateAndThrowAsync(request, ct);
 
         var businessId = currentUser.RequireBusinessId();
+        var name = request.Name.Trim();
 
-        // Check zone limit
-        var sub = await db.BusinessSubscriptions.FirstOrDefaultAsync(s => s.BusinessId == businessId, ct);
-        if (sub != null)
+        var subscription = await repository.GetSubscriptionAsync(businessId, ct);
+        if (subscription != null)
         {
-            var currentCount = await db.Zones.CountAsync(z => z.IsActive, ct);
-            if (currentCount >= sub.ZoneLimit)
-                throw new LimitReachedException($"Zone limit of {sub.ZoneLimit} reached for your plan");
+            var activeCount = await repository.CountActiveAsync(ct);
+            if (activeCount >= subscription.ZoneLimit)
+                throw new LimitReachedException($"Zone limit of {subscription.ZoneLimit} reached for your plan");
         }
 
-        // Check duplicate name
-        var exists = await db.Zones.AnyAsync(z => z.Name == request.Name.Trim(), ct);
-        if (exists)
+        if (await repository.NameExistsAsync(name, null, ct))
             throw new ConflictException("Zone name already exists");
 
         var zone = new Zone
         {
             BusinessId = businessId,
-            Name = request.Name.Trim(),
+            Name = name,
             Color = request.Color,
             Capacity = request.Capacity
         };
-        db.Zones.Add(zone);
-        await db.SaveChangesAsync(ct);
 
-        return ToDto(zone);
+        repository.Add(zone);
+        await repository.SaveChangesAsync(ct);
+        return zone;
     }
 
-    public async Task<ZoneDto> UpdateAsync(Guid id, UpdateZoneRequest request, CancellationToken ct)
+    public async Task<Zone> UpdateAsync(Guid id, UpdateZoneRequest request, CancellationToken ct)
     {
         await new UpdateZoneValidator().ValidateAndThrowAsync(request, ct);
 
-        var zone = await db.Zones.FindAsync([id], ct)
+        var zone = await repository.FindAsync(id, ct)
             ?? throw new NotFoundException("Zone not found");
 
-        var nameConflict = await db.Zones.AnyAsync(z => z.Id != id && z.Name == request.Name.Trim(), ct);
-        if (nameConflict) throw new ConflictException("Zone name already exists");
+        var name = request.Name.Trim();
+        if (await repository.NameExistsAsync(name, id, ct))
+            throw new ConflictException("Zone name already exists");
 
-        zone.Name = request.Name.Trim();
+        zone.Name = name;
         zone.Color = request.Color;
         zone.Capacity = request.Capacity;
         zone.IsActive = request.IsActive;
-        await db.SaveChangesAsync(ct);
 
-        return ToDto(zone);
+        await repository.SaveChangesAsync(ct);
+        return zone;
     }
 
     // Zones model retirement with IsActive rather than ArchivedAtUtc, so this is delete
@@ -77,14 +67,14 @@ public class ZoneService(AppDbContext db, CurrentUserService currentUser) : IZon
     // made in it.
     public async Task DeleteAsync(Guid id, CancellationToken ct)
     {
-        var zone = await db.Zones.FindAsync([id], ct)
+        var zone = await repository.FindAsync(id, ct)
             ?? throw new NotFoundException("Zone not found");
 
         Archiving.EnsureDeletable("zone",
-            new Dependent("bookings", await db.Bookings.CountAsync(b => b.ZoneId == id, ct)),
-            new Dependent("jobs", await db.Jobs.CountAsync(j => j.AssignedZoneId == id, ct)));
+            new Dependent("bookings", await repository.CountDependentBookingsAsync(id, ct)),
+            new Dependent("jobs", await repository.CountDependentJobsAsync(id, ct)));
 
-        db.Zones.Remove(zone);
-        await db.SaveChangesAsync(ct);
+        repository.Remove(zone);
+        await repository.SaveChangesAsync(ct);
     }
 }

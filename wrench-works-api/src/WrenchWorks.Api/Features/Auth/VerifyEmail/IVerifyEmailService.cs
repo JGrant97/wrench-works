@@ -1,9 +1,14 @@
 namespace WrenchWorks.Api.Features.Auth.VerifyEmail;
 
-// The VerifyEmail slice behind an interface: the endpoints become a thin HTTP shell.
-// Methods return DTOs, not IResult -- failures are thrown and mapped by
-// ErrorHandlingMiddleware, so nothing here needs to know about status codes.
+// Verification succeeds two ways and the difference is worth telling the user about, but
+// the wording is presentation -- the handler turns this into the message.
+public enum VerifyEmailOutcome
+{
+    Verified,
+    AlreadyVerified
+}
+
 public interface IVerifyEmailService
 {
-    Task<VerifyEmailResultDto> HandleAsync(VerifyEmailRequest request, CancellationToken ct);
+    Task<VerifyEmailOutcome> HandleAsync(VerifyEmailRequest request, CancellationToken ct);
 }

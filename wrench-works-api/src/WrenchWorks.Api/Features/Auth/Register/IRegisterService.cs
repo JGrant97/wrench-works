@@ -1,9 +1,12 @@
+using WrenchWorks.Domain.Entities;
+using Entities = WrenchWorks.Domain.Entities;
+
 namespace WrenchWorks.Api.Features.Auth.Register;
 
-// The Register slice behind an interface: the endpoints become a thin HTTP shell.
-// Methods return DTOs, not IResult -- failures are thrown and mapped by
-// ErrorHandlingMiddleware, so nothing here needs to know about status codes.
+// What registration created. The handler turns this into RegisterResponse.
+public record RegistrationResult(User Owner, Entities.Business Business);
+
 public interface IRegisterService
 {
-    Task<RegisterResponse> HandleAsync(RegisterRequest request, CancellationToken ct);
+    Task<RegistrationResult> HandleAsync(RegisterRequest request, CancellationToken ct);
 }

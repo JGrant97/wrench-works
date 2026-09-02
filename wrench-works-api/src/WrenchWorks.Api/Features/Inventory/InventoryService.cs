@@ -1,115 +1,49 @@
 using FluentValidation;
-using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.EntityFrameworkCore;
 using WrenchWorks.Api.Auth;
 using WrenchWorks.Api.Features.Common;
 using WrenchWorks.Api.Middleware;
 using WrenchWorks.Domain.Entities;
-using WrenchWorks.Infrastructure.Persistence;
 
 namespace WrenchWorks.Api.Features.Inventory;
 
-public class InventoryService(AppDbContext db, CurrentUserService currentUser) : IInventoryService
+public class InventoryService(IInventoryRepository repository, CurrentUserService currentUser) : IInventoryService
 {
-    public async Task<List<InventoryCategoryDto>> ListCategoriesAsync(CancellationToken ct)
-    {
-        var categories = await db.InventoryCategories
-            .OrderBy(c => c.Name)
-            .Select(c => new InventoryCategoryDto(c.Id, c.Name, c.Items.Count))
-            .ToListAsync(ct);
-        return categories;
-    }
+    public Task<List<CategoryWithItemCount>> ListCategoriesAsync(CancellationToken ct) =>
+        repository.ListCategoriesAsync(ct);
 
-    public async Task<InventoryCategoryDto> CreateCategoryAsync(CreateCategoryRequest request, CancellationToken ct)
+    public async Task<InventoryCategory> CreateCategoryAsync(CreateCategoryRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
             throw new ValidationException("Name required");
 
-        var exists = await db.InventoryCategories.IgnoreQueryFilters().AnyAsync(c => c.Name == request.Name.Trim(), ct);
-        if (exists) throw new ConflictException("Category already exists");
+        var name = request.Name.Trim();
+        if (await repository.CategoryNameExistsAsync(name, ct))
+            throw new ConflictException("Category already exists");
 
-        var cat = new InventoryCategory { Name = request.Name.Trim() };
-        db.InventoryCategories.Add(cat);
-        await db.SaveChangesAsync(ct);
+        var category = new InventoryCategory { Name = name };
+        repository.AddCategory(category);
+        await repository.SaveChangesAsync(ct);
 
-        return new InventoryCategoryDto(cat.Id, cat.Name, 0);
+        return category;
     }
 
-    public async Task<PagedResult<InventoryItemDto>> ListItemsAsync(int page = 1, int pageSize = 25, string? search = null, Guid? categoryId = null, bool? lowStockOnly = null, bool includeArchived = false, CancellationToken ct = default)
-    {
-        var query = db.InventoryItems.Include(i => i.Category).AsQueryable();
-        // A discontinued part stays out of the picker but keeps its movement history.
-        if (!includeArchived) query = query.Where(i => i.ArchivedAtUtc == null);
+    public Task<PagedResult<InventoryItem>> ListItemsAsync(int page, int pageSize, string? search,
+        Guid? categoryId, bool? lowStockOnly, bool includeArchived, CancellationToken ct) =>
+        repository.ListItemsAsync(page, pageSize, search, categoryId, lowStockOnly, includeArchived, ct);
 
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var s = search.ToLower();
-            query = query.Where(i => i.Name.ToLower().Contains(s) || (i.Sku != null && i.Sku.ToLower().Contains(s)));
-        }
-        if (categoryId.HasValue) query = query.Where(i => i.CategoryId == categoryId.Value);
-        if (lowStockOnly == true) query = query.Where(i => i.StockOnHand <= i.ReorderThreshold);
-
-        var total = await query.CountAsync(ct);
-        var items = await query
-            .OrderBy(i => i.Name)
-            .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(i => new InventoryItemDto(i.Id, i.Name, i.Sku, i.CategoryId, i.Category != null ? i.Category.Name : null, i.UnitCost, i.RetailPrice, i.StockOnHand, i.ReorderThreshold, i.StockOnHand <= i.ReorderThreshold, i.IsConsumable, i.CreatedAtUtc))
-            .ToListAsync(ct);
-
-        return new PagedResult<InventoryItemDto>(items, total, page, pageSize);
-    }
-
-    public async Task<InventoryItemDto> GetItemAsync(Guid id, CancellationToken ct)
-    {
-        var item = await db.InventoryItems.Include(i => i.Category).FirstOrDefaultAsync(i => i.Id == id, ct)
+    public async Task<InventoryItem> GetItemAsync(Guid id, CancellationToken ct) =>
+        await repository.FindItemWithCategoryAsync(id, ct)
             ?? throw new NotFoundException("Inventory item not found");
 
-        return new InventoryItemDto(item.Id, item.Name, item.Sku, item.CategoryId, item.Category?.Name, item.UnitCost, item.RetailPrice, item.StockOnHand, item.ReorderThreshold, item.StockOnHand <= item.ReorderThreshold, item.IsConsumable, item.CreatedAtUtc);
-    }
-
-    public async Task DeleteItemAsync(Guid id, CancellationToken ct)
-    {
-        var item = await db.InventoryItems.FindAsync([id], ct)
-            ?? throw new NotFoundException("Item not found");
-
-        Archiving.EnsureDeletable("item",
-            new Dependent("job part lines", await db.JobPartLines.CountAsync(p => p.InventoryItemId == id, ct)),
-            new Dependent("stock movements", await db.StockMovements.CountAsync(m => m.InventoryItemId == id, ct)));
-
-        db.InventoryItems.Remove(item);
-        await db.SaveChangesAsync(ct);
-        return;
-    }
-
-    public async Task<ArchiveResultDto> ArchiveItemAsync(Guid id, CancellationToken ct)
-    {
-        var item = await db.InventoryItems.FindAsync([id], ct)
-            ?? throw new NotFoundException("Item not found");
-        var result = Archiving.Archive(item, id);
-        await db.SaveChangesAsync(ct);
-        return result;
-    }
-
-    public async Task<ArchiveResultDto> UnarchiveItemAsync(Guid id, CancellationToken ct)
-    {
-        var item = await db.InventoryItems.FindAsync([id], ct)
-            ?? throw new NotFoundException("Item not found");
-        var result = Archiving.Unarchive(item, id);
-        await db.SaveChangesAsync(ct);
-        return result;
-    }
-
-    public async Task<InventoryItemCreatedDto> CreateItemAsync(CreateItemRequest request, CancellationToken ct)
+    public async Task<InventoryItem> CreateItemAsync(CreateItemRequest request, CancellationToken ct)
     {
         await new CreateItemValidator().ValidateAndThrowAsync(request, ct);
 
         var businessId = currentUser.RequireBusinessId();
 
-        if (!string.IsNullOrWhiteSpace(request.Sku))
-        {
-            var skuExists = await db.InventoryItems.AnyAsync(i => i.Sku == request.Sku.Trim(), ct);
-            if (skuExists) throw new ConflictException("SKU already exists");
-        }
+        if (!string.IsNullOrWhiteSpace(request.Sku)
+            && await repository.SkuExistsAsync(request.Sku.Trim(), null, ct))
+            throw new ConflictException("SKU already exists");
 
         var item = new InventoryItem
         {
@@ -124,11 +58,13 @@ public class InventoryService(AppDbContext db, CurrentUserService currentUser) :
             ReorderThreshold = request.ReorderThreshold,
             CompatibilityTagsJson = request.CompatibilityTagsJson
         };
-        db.InventoryItems.Add(item);
+        repository.AddItem(item);
 
+        // Opening stock is a movement like any other, so the trail reconstructs the level
+        // from zero rather than starting from an unexplained number.
         if (request.StockOnHand > 0)
         {
-            db.StockMovements.Add(new StockMovement
+            repository.AddStockMovement(new StockMovement
             {
                 BusinessId = businessId,
                 InventoryItemId = item.Id,
@@ -139,20 +75,18 @@ public class InventoryService(AppDbContext db, CurrentUserService currentUser) :
             });
         }
 
-        await db.SaveChangesAsync(ct);
-        return new InventoryItemCreatedDto(item.Id, item.Name, item.Sku);
+        await repository.SaveChangesAsync(ct);
+        return item;
     }
 
-    public async Task<InventoryItemDto> UpdateItemAsync(Guid id, UpdateItemRequest request, CancellationToken ct)
+    public async Task<InventoryItem> UpdateItemAsync(Guid id, UpdateItemRequest request, CancellationToken ct)
     {
-        var item = await db.InventoryItems.FindAsync([id], ct)
+        var item = await repository.FindItemAsync(id, ct)
             ?? throw new NotFoundException("Inventory item not found");
 
-        if (!string.IsNullOrWhiteSpace(request.Sku) && request.Sku.Trim() != item.Sku)
-        {
-            var skuExists = await db.InventoryItems.AnyAsync(i => i.Sku == request.Sku.Trim() && i.Id != id, ct);
-            if (skuExists) throw new ConflictException("SKU already exists");
-        }
+        if (!string.IsNullOrWhiteSpace(request.Sku) && request.Sku.Trim() != item.Sku
+            && await repository.SkuExistsAsync(request.Sku.Trim(), id, ct))
+            throw new ConflictException("SKU already exists");
 
         item.Name = request.Name.Trim();
         item.Sku = request.Sku?.Trim();
@@ -160,26 +94,32 @@ public class InventoryService(AppDbContext db, CurrentUserService currentUser) :
         item.UnitCost = request.UnitCost;
         item.RetailPrice = request.RetailPrice;
         item.ReorderThreshold = request.ReorderThreshold;
+        // Only affects which tax category a job line takes; consumables still come from
+        // stock and still bill as a part line. See docs/tax.md.
         item.IsConsumable = request.IsConsumable;
 
-        await db.SaveChangesAsync(ct);
-        return new InventoryItemDto(item.Id, item.Name, item.Sku, item.CategoryId, null, item.UnitCost, item.RetailPrice, item.StockOnHand, item.ReorderThreshold, item.StockOnHand <= item.ReorderThreshold, item.IsConsumable, item.CreatedAtUtc);
+        await repository.SaveChangesAsync(ct);
+        return item;
     }
 
-    public async Task<StockLevelDto> AdjustStockAsync(Guid id, AdjustStockRequest request, CancellationToken ct)
+    public async Task<InventoryItem> AdjustStockAsync(Guid id, AdjustStockRequest request, CancellationToken ct)
     {
-        var item = await db.InventoryItems.FindAsync([id], ct)
+        var item = await repository.FindItemAsync(id, ct)
             ?? throw new NotFoundException("Inventory item not found");
 
+        // The dropdown is generated from this enum, so an invalid reason means a
+        // hand-crafted request rather than a stale UI.
         if (!Enum.TryParse<StockMovementReason>(request.Reason, true, out var reason))
             throw new ValidationException("Invalid reason");
 
         if (item.StockOnHand + request.QuantityDelta < 0)
             throw new ConflictException("Stock cannot go below zero");
 
+        // Read-then-write, but InventoryItem now maps IsRowVersion, so a concurrent write
+        // raises a 409 rather than silently losing one of the two adjustments.
         item.StockOnHand += request.QuantityDelta;
 
-        db.StockMovements.Add(new StockMovement
+        repository.AddStockMovement(new StockMovement
         {
             BusinessId = item.BusinessId,
             InventoryItemId = id,
@@ -189,7 +129,40 @@ public class InventoryService(AppDbContext db, CurrentUserService currentUser) :
             CreatedByUserId = currentUser.UserId
         });
 
-        await db.SaveChangesAsync(ct);
-        return new StockLevelDto(item.Id, item.StockOnHand);
+        await repository.SaveChangesAsync(ct);
+        return item;
+    }
+
+    public async Task DeleteItemAsync(Guid id, CancellationToken ct)
+    {
+        var item = await repository.FindItemAsync(id, ct)
+            ?? throw new NotFoundException("Item not found");
+
+        Archiving.EnsureDeletable("item",
+            new Dependent("job part lines", await repository.CountJobPartLinesAsync(id, ct)),
+            new Dependent("stock movements", await repository.CountStockMovementsAsync(id, ct)));
+
+        repository.RemoveItem(item);
+        await repository.SaveChangesAsync(ct);
+    }
+
+    public async Task<ArchiveResultDto> ArchiveItemAsync(Guid id, CancellationToken ct)
+    {
+        var item = await repository.FindItemAsync(id, ct)
+            ?? throw new NotFoundException("Item not found");
+
+        var result = Archiving.Archive(item, id);
+        await repository.SaveChangesAsync(ct);
+        return result;
+    }
+
+    public async Task<ArchiveResultDto> UnarchiveItemAsync(Guid id, CancellationToken ct)
+    {
+        var item = await repository.FindItemAsync(id, ct)
+            ?? throw new NotFoundException("Item not found");
+
+        var result = Archiving.Unarchive(item, id);
+        await repository.SaveChangesAsync(ct);
+        return result;
     }
 }
