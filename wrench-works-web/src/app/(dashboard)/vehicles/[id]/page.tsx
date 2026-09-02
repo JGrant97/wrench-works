@@ -15,23 +15,9 @@ import { mutate } from "swr";
 import { ErrorState } from "@/components/data-state";
 import { RecordActions } from "@/components/record-actions";
 import { VehicleCataloguePicker, type CatalogueSelection } from "@/components/vehicle-catalogue-picker";
+import type { VehicleDto as VehicleDetail, VehicleHistoryItemDto as HistoryItem } from "@/api/generated/models";
 
-interface VehicleDetail {
-  id: string; customerId: string; customerName: string;
-  // Null on a vehicle created before the catalogue existed: it has only the deprecated
-  // free-text make/model. The details list filters falsy values out, so those rows simply
-  // show fewer fields, and Edit requires re-picking from the catalogue before saving.
-  displayName: string; variantId: string | null; year: number | null;
-  makeName: string | null; modelName: string | null;
-  trim: string | null; bodyStyle: string | null;
-  engineDisplacementL: number | null; fuelType: string | null; transmission: string | null;
-  colourId: string | null; colourName: string | null;
-  registration: string | null; vin: string | null; notes: string | null;
-}
 
-interface HistoryItem {
-  jobId: string; title: string; status: string; createdAtUtc: string; laborTotal: number; partsTotal: number;
-}
 
 export default function VehicleDetailPage() {
   const { format } = useCurrency();

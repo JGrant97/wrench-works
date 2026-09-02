@@ -5,14 +5,12 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { SaveTaxRateRequestRate } from './saveTaxRateRequestRate';
 import type { SaveTaxRateRequestCategories } from './saveTaxRateRequestCategories';
 import type { SaveTaxRateRequestComponents } from './saveTaxRateRequestComponents';
 
 export interface SaveTaxRateRequest {
   name: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  rate: SaveTaxRateRequestRate;
+  rate: number;
   categories: SaveTaxRateRequestCategories;
   components: SaveTaxRateRequestComponents;
 }

@@ -264,9 +264,23 @@ and the status code.
 in the generated client dropped from 78 to 9 — precisely the nine `DELETE`s that really do
 return 204. `npm run build` and all 63 API tests pass.
 
-**So the prerequisite is met: migrating a page to the generated client now does catch this
-bug class.** A page reading `line.inventoryItemName` when the DTO says `itemName` is a
-compile error today, for every endpoint rather than eight of them.
+**Prerequisite met, and then used.** On 2 Sep 2026 every page adopted the generated model
+types: 19 page-local interfaces across 11 pages, plus the shared `_lib` modules and
+`use-customer-vehicle`, which re-export them under their existing names. There are now zero
+hand-written API interfaces under `src/app`.
+
+So a page reading `line.inventoryItemName` when the DTO says `itemName` is a compile error
+today — the four bugs above could not recur silently. *Verified by deliberately breaking
+it*: renaming a field usage to one the contract lacks fails `tsc` with "Property
+'capacitySlots' does not exist on type 'ZoneDto'"; the old local interface compiled and
+rendered `undefined`.
+
+One drift this surfaced: `settings/users` declared `userId`, which the API has never sent —
+it sends `id` and `businessUserId`. Harmless only because the field was never read.
+
+The *fetching* is still legacy: pages remain client components on `useApi` through the
+proxy. Adopting the generated types did not require changing that, which is why it was
+worth doing first.
 
 One finding worth carrying forward: `.Produces<List<CatalogueVariantDto>>()` on
 `GET /catalogue/variants` had been declaring a type the handler never returned — the handler

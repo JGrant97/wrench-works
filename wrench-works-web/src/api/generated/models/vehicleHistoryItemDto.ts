@@ -6,8 +6,6 @@
  * OpenAPI spec version: v1
  */
 import type { VehicleHistoryItemDtoScheduledStartUtc } from './vehicleHistoryItemDtoScheduledStartUtc';
-import type { VehicleHistoryItemDtoLaborTotal } from './vehicleHistoryItemDtoLaborTotal';
-import type { VehicleHistoryItemDtoPartsTotal } from './vehicleHistoryItemDtoPartsTotal';
 
 export interface VehicleHistoryItemDto {
   jobId: string;
@@ -16,8 +14,6 @@ export interface VehicleHistoryItemDto {
   scheduledStartUtc: VehicleHistoryItemDtoScheduledStartUtc;
   createdAtUtc: string;
   partsUsed: string[];
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  laborTotal: VehicleHistoryItemDtoLaborTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  partsTotal: VehicleHistoryItemDtoPartsTotal;
+  laborTotal: number;
+  partsTotal: number;
 }

@@ -12,26 +12,9 @@ import { Plus, Briefcase, Search } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
+import type { JobListItemDto as Job, PagedResultOfJobListItemDto as JobListResponse } from "@/api/generated/models";
 
-interface Job {
-  id: string;
-  title: string;
-  status: string;
-  priority: string;
-  customerName: string;
-  vehicleDisplay: string;
-  scheduledStartUtc: string | null;
-  laborTotal: number;
-  partsTotal: number;
-  createdAtUtc: string;
-}
 
-interface JobListResponse {
-  items: Job[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
 
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },

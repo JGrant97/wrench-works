@@ -11,6 +11,7 @@ import { SettingsNav } from "@/components/settings-nav";
 import { ErrorState } from "@/components/data-state";
 import { RecordActions } from "@/components/record-actions";
 import { fetcher } from "@/lib/fetcher";
+import type { TaxRateComponentDto as TaxRateComponent, TaxRateDto as TaxRate } from "@/api/generated/models";
 
 /**
  * Tax rates the business configures for itself. See docs/tax.md for why the product does
@@ -21,22 +22,7 @@ import { fetcher } from "@/lib/fetcher";
  * someone 0.2% instead of 20%.
  */
 
-interface TaxRateComponent {
-  id: string;
-  name: string;
-  rate: number;
-  sortOrder: number;
-}
 
-interface TaxRate {
-  id: string;
-  name: string;
-  rate: number;
-  /** "Labour" | "Parts" | "Consumables". A rate with none applies to nothing. */
-  categories: string[];
-  isArchived: boolean;
-  components: TaxRateComponent[];
-}
 
 /**
  * The categories a rate can cover. Mirrors the TaxCategory enum on the server — the list

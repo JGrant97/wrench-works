@@ -11,15 +11,10 @@ import toast from "react-hot-toast";
 import { mutate } from "swr";
 import { ErrorState } from "@/components/data-state";
 import { FeatureGate } from "@/components/feature-gate";
+import type { InventoryItemDto as InventoryItem, InventoryCategoryDto as Category, PagedResultOfInventoryItemDto as ListResponse } from "@/api/generated/models";
 
-interface InventoryItem {
-  id: string; name: string; sku: string | null; categoryId: string | null; categoryName: string | null;
-  unitCost: number; retailPrice: number | null; stockOnHand: number; reorderThreshold: number; lowStock: boolean;
-  /** Shop supplies rather than a fitted part — decides the tax category. See docs/tax.md. */
-  isConsumable: boolean;
-}
-interface Category { id: string; name: string; }
-interface ListResponse { items: InventoryItem[]; total: number; page: number; pageSize: number; }
+
+
 
 export default function InventoryPage() {
   const { format } = useCurrency();

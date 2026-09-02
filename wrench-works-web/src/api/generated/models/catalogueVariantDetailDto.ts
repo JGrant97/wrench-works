@@ -5,8 +5,6 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { CatalogueVariantDetailDtoYearFrom } from './catalogueVariantDetailDtoYearFrom';
-import type { CatalogueVariantDetailDtoYearTo } from './catalogueVariantDetailDtoYearTo';
 import type { CatalogueVariantDetailDtoTrim } from './catalogueVariantDetailDtoTrim';
 import type { CatalogueVariantDetailDtoBodyStyle } from './catalogueVariantDetailDtoBodyStyle';
 import type { CatalogueVariantDetailDtoEngineDisplacementL } from './catalogueVariantDetailDtoEngineDisplacementL';
@@ -27,15 +25,11 @@ export interface CatalogueVariantDetailDto {
   makeId: string;
   makeName: string;
   label: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  yearFrom: CatalogueVariantDetailDtoYearFrom;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  yearTo: CatalogueVariantDetailDtoYearTo;
+  yearFrom: number;
+  yearTo: number;
   trim: CatalogueVariantDetailDtoTrim;
   bodyStyle: CatalogueVariantDetailDtoBodyStyle;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
   engineDisplacementL: CatalogueVariantDetailDtoEngineDisplacementL;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
   engineCylinders: CatalogueVariantDetailDtoEngineCylinders;
   fuelType: string;
   transmission: string;

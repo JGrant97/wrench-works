@@ -6,15 +6,11 @@
  * OpenAPI spec version: v1
  */
 import type { LowStockItemDtoSku } from './lowStockItemDtoSku';
-import type { LowStockItemDtoStockOnHand } from './lowStockItemDtoStockOnHand';
-import type { LowStockItemDtoReorderThreshold } from './lowStockItemDtoReorderThreshold';
 
 export interface LowStockItemDto {
   id: string;
   name: string;
   sku: LowStockItemDtoSku;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  stockOnHand: LowStockItemDtoStockOnHand;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  reorderThreshold: LowStockItemDtoReorderThreshold;
+  stockOnHand: number;
+  reorderThreshold: number;
 }

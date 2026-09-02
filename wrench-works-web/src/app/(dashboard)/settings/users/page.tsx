@@ -9,20 +9,9 @@ import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
 import { ErrorState } from "@/components/data-state";
+import type { UserListItemDto as BusinessUserDto } from "@/api/generated/models";
 
-interface BusinessUserDto {
-  id: string;
-  userId: string;
-  name: string;
-  email: string;
-  status: string;
-  roles: string[];
-}
 
-interface RoleDto {
-  id: string;
-  name: string;
-}
 
 export default function SettingsUsersPage() {
   const { data: users, isLoading, error } = useApi<BusinessUserDto[]>("/api/users");

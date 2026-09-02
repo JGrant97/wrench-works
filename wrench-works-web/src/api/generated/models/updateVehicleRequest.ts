@@ -5,7 +5,6 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { UpdateVehicleRequestYear } from './updateVehicleRequestYear';
 import type { UpdateVehicleRequestColourId } from './updateVehicleRequestColourId';
 import type { UpdateVehicleRequestVin } from './updateVehicleRequestVin';
 import type { UpdateVehicleRequestRegistration } from './updateVehicleRequestRegistration';
@@ -13,8 +12,7 @@ import type { UpdateVehicleRequestNotes } from './updateVehicleRequestNotes';
 
 export interface UpdateVehicleRequest {
   variantId: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  year: UpdateVehicleRequestYear;
+  year: number;
   colourId: UpdateVehicleRequestColourId;
   vin: UpdateVehicleRequestVin;
   registration: UpdateVehicleRequestRegistration;

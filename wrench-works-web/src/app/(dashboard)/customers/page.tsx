@@ -11,22 +11,9 @@ import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
 import { mutate } from "swr";
 import { ErrorState } from "@/components/data-state";
+import type { CustomerDto as Customer, PagedResultOfCustomerDto as CustomerListResponse } from "@/api/generated/models";
 
-interface Customer {
-  id: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  vehicleCount: number;
-  createdAtUtc: string;
-}
 
-interface CustomerListResponse {
-  items: Customer[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
 
 export default function CustomersPage() {
   const canManage = usePermission("customers.manage");

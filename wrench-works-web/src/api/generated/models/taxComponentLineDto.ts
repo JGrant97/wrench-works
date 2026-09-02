@@ -5,10 +5,8 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { TaxComponentLineDtoRatePercent } from './taxComponentLineDtoRatePercent';
 
 export interface TaxComponentLineDto {
   name: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  ratePercent: TaxComponentLineDtoRatePercent;
+  ratePercent: number;
 }

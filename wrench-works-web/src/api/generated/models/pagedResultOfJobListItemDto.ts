@@ -6,9 +6,6 @@
  * OpenAPI spec version: v1
  */
 import type { JobListItemDto } from './jobListItemDto';
-import type { PagedResultOfJobListItemDtoTotal } from './pagedResultOfJobListItemDtoTotal';
-import type { PagedResultOfJobListItemDtoPage } from './pagedResultOfJobListItemDtoPage';
-import type { PagedResultOfJobListItemDtoPageSize } from './pagedResultOfJobListItemDtoPageSize';
 
 /**
  * The shape every paginated list endpoint returns.
@@ -25,10 +22,7 @@ change — it is the same JSON, now described.
  */
 export interface PagedResultOfJobListItemDto {
   items: JobListItemDto[];
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  total: PagedResultOfJobListItemDtoTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  page: PagedResultOfJobListItemDtoPage;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  pageSize: PagedResultOfJobListItemDtoPageSize;
+  total: number;
+  page: number;
+  pageSize: number;
 }

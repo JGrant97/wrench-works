@@ -15,25 +15,9 @@ import { mutate } from "swr";
 import { ErrorState } from "@/components/data-state";
 import { RecordActions } from "@/components/record-actions";
 import { VehicleCataloguePicker, type CatalogueSelection } from "@/components/vehicle-catalogue-picker";
+import type { CustomerVehicleDto as Vehicle, CustomerDetailDto as CustomerDetail } from "@/api/generated/models";
 
-interface Vehicle {
-  id: string;
-  displayName: string;
-  year: number | null;
-  registration: string | null;
-  colourName: string | null;
-}
 
-interface CustomerDetail {
-  id: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  address: string | null;
-  notes: string | null;
-  vehicles: Vehicle[];
-  recentJobs: { id: string; title: string; status: string; vehicleDisplay: string | null; total: number; createdAtUtc: string }[];
-}
 
 export default function CustomerDetailPage() {
   const { format } = useCurrency();

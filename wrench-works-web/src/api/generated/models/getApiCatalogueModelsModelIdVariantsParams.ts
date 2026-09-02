@@ -7,8 +7,5 @@
  */
 
 export type GetApiCatalogueModelsModelIdVariantsParams = {
-/**
- * @pattern ^-?(?:0|[1-9]\d*)$
- */
-year?: number | string;
+year?: number;
 };

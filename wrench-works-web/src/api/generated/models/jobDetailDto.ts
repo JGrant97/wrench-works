@@ -14,11 +14,6 @@ import type { JobDetailDtoScheduledStartUtc } from './jobDetailDtoScheduledStart
 import type { JobDetailDtoScheduledEndUtc } from './jobDetailDtoScheduledEndUtc';
 import type { LaborLineDto } from './laborLineDto';
 import type { PartLineDto } from './partLineDto';
-import type { JobDetailDtoLaborTotal } from './jobDetailDtoLaborTotal';
-import type { JobDetailDtoPartsTotal } from './jobDetailDtoPartsTotal';
-import type { JobDetailDtoGrandTotal } from './jobDetailDtoGrandTotal';
-import type { JobDetailDtoSubTotal } from './jobDetailDtoSubTotal';
-import type { JobDetailDtoTaxTotal } from './jobDetailDtoTaxTotal';
 import type { TaxLineDto } from './taxLineDto';
 
 export interface JobDetailDto {
@@ -38,16 +33,11 @@ export interface JobDetailDto {
   scheduledEndUtc: JobDetailDtoScheduledEndUtc;
   laborLines: LaborLineDto[];
   partLines: PartLineDto[];
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  laborTotal: JobDetailDtoLaborTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  partsTotal: JobDetailDtoPartsTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  grandTotal: JobDetailDtoGrandTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  subTotal: JobDetailDtoSubTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  taxTotal: JobDetailDtoTaxTotal;
+  laborTotal: number;
+  partsTotal: number;
+  grandTotal: number;
+  subTotal: number;
+  taxTotal: number;
   taxLabel: string;
   pricesIncludeTax: boolean;
   customerIsTaxExempt: boolean;

@@ -10,18 +10,8 @@ import { mutate } from "swr";
 import { ErrorState } from "@/components/data-state";
 import { SUPPORTED_CURRENCIES } from "@/lib/currency";
 import { SettingsNav } from "@/components/settings-nav";
+import type { BusinessDto as BusinessInfo } from "@/api/generated/models";
 
-interface BusinessInfo {
-  id: string;
-  name: string;
-  address: string | null;
-  phone: string | null;
-  timezone: string;
-  currency: string;
-  pricesIncludeTax: boolean;
-  taxRegistrationNumber: string | null;
-  taxLabel: string;
-}
 
 export default function SettingsGeneralPage() {
   const canManage = usePermission("settings.manage");

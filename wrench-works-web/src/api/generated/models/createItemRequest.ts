@@ -7,24 +7,17 @@
  */
 import type { CreateItemRequestSku } from './createItemRequestSku';
 import type { CreateItemRequestCategoryId } from './createItemRequestCategoryId';
-import type { CreateItemRequestUnitCost } from './createItemRequestUnitCost';
 import type { CreateItemRequestRetailPrice } from './createItemRequestRetailPrice';
-import type { CreateItemRequestStockOnHand } from './createItemRequestStockOnHand';
-import type { CreateItemRequestReorderThreshold } from './createItemRequestReorderThreshold';
 import type { CreateItemRequestCompatibilityTagsJson } from './createItemRequestCompatibilityTagsJson';
 
 export interface CreateItemRequest {
   name: string;
   sku: CreateItemRequestSku;
   categoryId: CreateItemRequestCategoryId;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  unitCost: CreateItemRequestUnitCost;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
+  unitCost: number;
   retailPrice: CreateItemRequestRetailPrice;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  stockOnHand: CreateItemRequestStockOnHand;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  reorderThreshold: CreateItemRequestReorderThreshold;
+  stockOnHand: number;
+  reorderThreshold: number;
   compatibilityTagsJson: CreateItemRequestCompatibilityTagsJson;
   isConsumable?: boolean;
 }

@@ -5,13 +5,9 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { AddLaborLineRequestHours } from './addLaborLineRequestHours';
-import type { AddLaborLineRequestRate } from './addLaborLineRequestRate';
 
 export interface AddLaborLineRequest {
   description: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  hours: AddLaborLineRequestHours;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  rate: AddLaborLineRequestRate;
+  hours: number;
+  rate: number;
 }

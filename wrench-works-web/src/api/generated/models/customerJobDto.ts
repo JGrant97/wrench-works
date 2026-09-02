@@ -6,14 +6,12 @@
  * OpenAPI spec version: v1
  */
 import type { CustomerJobDtoVehicleDisplay } from './customerJobDtoVehicleDisplay';
-import type { CustomerJobDtoTotal } from './customerJobDtoTotal';
 
 export interface CustomerJobDto {
   id: string;
   title: string;
   status: string;
   vehicleDisplay: CustomerJobDtoVehicleDisplay;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  total: CustomerJobDtoTotal;
+  total: number;
   createdAtUtc: string;
 }

@@ -6,11 +6,9 @@
  * OpenAPI spec version: v1
  */
 import type { CreateZoneRequestColor } from './createZoneRequestColor';
-import type { CreateZoneRequestCapacity } from './createZoneRequestCapacity';
 
 export interface CreateZoneRequest {
   name: string;
   color: CreateZoneRequestColor;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  capacity: CreateZoneRequestCapacity;
+  capacity: number;
 }

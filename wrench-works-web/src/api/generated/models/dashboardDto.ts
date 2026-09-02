@@ -9,12 +9,6 @@ import type { DashboardBookingDto } from './dashboardBookingDto';
 import type { DashboardJobDto } from './dashboardJobDto';
 import type { StatusCountDto } from './statusCountDto';
 import type { LowStockItemDto } from './lowStockItemDto';
-import type { DashboardDtoOpenJobCount } from './dashboardDtoOpenJobCount';
-import type { DashboardDtoUnscheduledJobCount } from './dashboardDtoUnscheduledJobCount';
-import type { DashboardDtoRevenueThisMonth } from './dashboardDtoRevenueThisMonth';
-import type { DashboardDtoRevenueLastMonth } from './dashboardDtoRevenueLastMonth';
-import type { DashboardDtoCustomerCount } from './dashboardDtoCustomerCount';
-import type { DashboardDtoVehicleCount } from './dashboardDtoVehicleCount';
 
 /**
  * Everything the opening screen needs, in one request.
@@ -28,16 +22,10 @@ export interface DashboardDto {
   activeJobs: DashboardJobDto[];
   jobsByStatus: StatusCountDto[];
   lowStockItems: LowStockItemDto[];
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  openJobCount: DashboardDtoOpenJobCount;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  unscheduledJobCount: DashboardDtoUnscheduledJobCount;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  revenueThisMonth: DashboardDtoRevenueThisMonth;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  revenueLastMonth: DashboardDtoRevenueLastMonth;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  customerCount: DashboardDtoCustomerCount;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  vehicleCount: DashboardDtoVehicleCount;
+  openJobCount: number;
+  unscheduledJobCount: number;
+  revenueThisMonth: number;
+  revenueLastMonth: number;
+  customerCount: number;
+  vehicleCount: number;
 }

@@ -21,57 +21,64 @@ public class CalendarService(ICalendarRepository repository, CurrentUserService 
         var (zone, customer, vehicle) = await ResolveBookingTargetsAsync(
             request.ZoneId, request.CustomerId, request.VehicleId, ct);
 
-        await EnsureSlotIsFreeAsync(request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, null, ct);
-
-        var booking = new Booking
+        // The conflict check and the insert are one atomic unit per bay. Without the lock
+        // two simultaneous requests both see a free slot and both commit -- two cars in
+        // one bay. See ICalendarRepository.WithZoneLockAsync for why not a constraint.
+        return await repository.WithZoneLockAsync(request.ZoneId, async () =>
         {
-            BusinessId = businessId,
-            ZoneId = request.ZoneId,
-            CustomerId = request.CustomerId,
-            VehicleId = request.VehicleId,
-            Title = request.Title.Trim(),
-            StartUtc = request.StartUtc,
-            EndUtc = request.EndUtc,
-            Notes = request.Notes,
-            CreatedByUserId = currentUser.UserId,
-            // Set so the handler can name the zone, customer and vehicle without re-reading.
-            Zone = zone,
-            Customer = customer,
-            Vehicle = vehicle
-        };
+            await EnsureSlotIsFreeAsync(request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, null, ct);
 
-        Job? linkedJob = null;
-        if (request.CreateJob)
-        {
-            linkedJob = new Job
+            var booking = new Booking
             {
                 BusinessId = businessId,
+                ZoneId = request.ZoneId,
                 CustomerId = request.CustomerId,
                 VehicleId = request.VehicleId,
                 Title = request.Title.Trim(),
-                Status = JobStatus.Scheduled,
-                AssignedZoneId = request.ZoneId,
-                ScheduledStartUtc = request.StartUtc,
-                ScheduledEndUtc = request.EndUtc,
-                CreatedByUserId = currentUser.UserId
+                StartUtc = request.StartUtc,
+                EndUtc = request.EndUtc,
+                Notes = request.Notes,
+                CreatedByUserId = currentUser.UserId,
+                // Set so the handler can name the zone, customer and vehicle without re-reading.
+                Zone = zone,
+                Customer = customer,
+                Vehicle = vehicle
             };
-            repository.AddJob(linkedJob);
-            booking.Job = linkedJob; // Sets booking.JobId
-        }
 
-        repository.AddBooking(booking);
-        await repository.SaveChangesAsync(ct);
+            Job? linkedJob = null;
+            if (request.CreateJob)
+            {
+                linkedJob = new Job
+                {
+                    BusinessId = businessId,
+                    CustomerId = request.CustomerId,
+                    VehicleId = request.VehicleId,
+                    Title = request.Title.Trim(),
+                    Status = JobStatus.Scheduled,
+                    AssignedZoneId = request.ZoneId,
+                    ScheduledStartUtc = request.StartUtc,
+                    ScheduledEndUtc = request.EndUtc,
+                    CreatedByUserId = currentUser.UserId
+                };
+                repository.AddJob(linkedJob);
+                booking.Job = linkedJob; // Sets booking.JobId
+            }
 
-        // Two saves, deliberately: booking.JobId and job.BookingId point at each other, so
-        // the reverse FK can only be set once the first insert has produced a row. Not
-        // atomic -- a failure between them leaves a job with no back-reference.
-        if (linkedJob != null)
-        {
-            linkedJob.BookingId = booking.Id;
+            repository.AddBooking(booking);
             await repository.SaveChangesAsync(ct);
-        }
 
-        return booking;
+            // Still two saves: booking.JobId and job.BookingId point at each other, so the
+            // reverse FK can only be set once the first insert has produced a row. Both now
+            // run inside the zone lock's transaction, so the pair commits or rolls back
+            // together -- the non-atomic gap this comment used to describe is closed.
+            if (linkedJob != null)
+            {
+                linkedJob.BookingId = booking.Id;
+                await repository.SaveChangesAsync(ct);
+            }
+
+            return booking;
+        }, ct);
     }
 
     /// <summary>
@@ -103,20 +110,23 @@ public class CalendarService(ICalendarRepository repository, CurrentUserService 
         var (zone, _, _) = await ResolveBookingTargetsAsync(
             request.ZoneId, request.CustomerId, request.VehicleId, ct);
 
-        await EnsureSlotIsFreeAsync(request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, id, ct);
+        return await repository.WithZoneLockAsync(request.ZoneId, async () =>
+        {
+            await EnsureSlotIsFreeAsync(request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, id, ct);
 
-        booking.ZoneId = request.ZoneId;
-        booking.CustomerId = request.CustomerId;
-        booking.VehicleId = request.VehicleId;
-        booking.Title = request.Title.Trim();
-        booking.StartUtc = request.StartUtc;
-        booking.EndUtc = request.EndUtc;
-        booking.Notes = request.Notes;
+            booking.ZoneId = request.ZoneId;
+            booking.CustomerId = request.CustomerId;
+            booking.VehicleId = request.VehicleId;
+            booking.Title = request.Title.Trim();
+            booking.StartUtc = request.StartUtc;
+            booking.EndUtc = request.EndUtc;
+            booking.Notes = request.Notes;
 
-        await CascadeToJobAsync(booking, request.ZoneId, request.StartUtc, request.EndUtc, ct);
-        await repository.SaveChangesAsync(ct);
+            await CascadeToJobAsync(booking, request.ZoneId, request.StartUtc, request.EndUtc, ct);
+            await repository.SaveChangesAsync(ct);
 
-        return booking;
+            return booking;
+        }, ct);
     }
 
     /// <summary>
@@ -157,16 +167,20 @@ public class CalendarService(ICalendarRepository repository, CurrentUserService 
             throw new ValidationException([new ValidationFailure(
                 nameof(request.StartUtc), "Start must be before end")]);
 
-        await EnsureSlotIsFreeAsync(request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, id, ct);
+        // Drag-to-move is the hot path for conflicts, so it takes the same lock as create.
+        return await repository.WithZoneLockAsync(request.ZoneId, async () =>
+        {
+            await EnsureSlotIsFreeAsync(request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, id, ct);
 
-        booking.ZoneId = request.ZoneId;
-        booking.StartUtc = request.StartUtc;
-        booking.EndUtc = request.EndUtc;
+            booking.ZoneId = request.ZoneId;
+            booking.StartUtc = request.StartUtc;
+            booking.EndUtc = request.EndUtc;
 
-        await CascadeToJobAsync(booking, request.ZoneId, request.StartUtc, request.EndUtc, ct);
-        await repository.SaveChangesAsync(ct);
+            await CascadeToJobAsync(booking, request.ZoneId, request.StartUtc, request.EndUtc, ct);
+            await repository.SaveChangesAsync(ct);
 
-        return booking;
+            return booking;
+        }, ct);
     }
 
     public async Task DeleteBookingAsync(Guid id, CancellationToken ct)

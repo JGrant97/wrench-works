@@ -5,14 +5,12 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { TaxRateDtoRate } from './taxRateDtoRate';
 import type { TaxRateComponentDto } from './taxRateComponentDto';
 
 export interface TaxRateDto {
   id: string;
   name: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  rate: TaxRateDtoRate;
+  rate: number;
   categories: string[];
   isArchived: boolean;
   components: TaxRateComponentDto[];

@@ -5,13 +5,9 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { TaxRateComponentRequestRate } from './taxRateComponentRequestRate';
-import type { TaxRateComponentRequestSortOrder } from './taxRateComponentRequestSortOrder';
 
 export interface TaxRateComponentRequest {
   name: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  rate: TaxRateComponentRequestRate;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  sortOrder: TaxRateComponentRequestSortOrder;
+  rate: number;
+  sortOrder: number;
 }

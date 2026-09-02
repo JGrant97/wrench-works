@@ -9,6 +9,11 @@ import { isSameDay, isBefore, isAfter, getDay, max as dateMax, min as dateMin } 
 import { formatTime } from "@/lib/utils";
 import { ApiError } from "@/lib/fetcher";
 
+// Re-exported from the generated client so these names stay stable for the
+// components that import them, while the shapes come from the API contract.
+import type { BookingDto as Booking, ZoneDto as Zone } from "@/api/generated/models";
+export type { Booking, Zone };
+
 /* ══════════════════════════════════════════════════
    Types
    ══════════════════════════════════════════════════ */
@@ -40,30 +45,7 @@ export function describeBookingError(err: unknown, bookings: Booking[] | undefin
   return `Clashes with ${described} in ${clashes[0].zoneName}.`;
 }
 
-export interface Booking {
-  id: string;
-  zoneId: string;
-  zoneName: string;
-  zoneColor: string | null;
-  customerId: string;
-  customerName: string;
-  vehicleId: string;
-  vehicleDisplay: string;
-  title: string;
-  startUtc: string;
-  endUtc: string;
-  notes: string | null;
-  status: string;
-  jobId: string | null;
-}
 
-export interface Zone {
-  id: string;
-  name: string;
-  color: string | null;
-  capacity: number;
-  isActive: boolean;
-}
 
 export type ViewMode = "week" | "month";
 

@@ -6,25 +6,15 @@
  * OpenAPI spec version: v1
  */
 import type { PartLineDtoSku } from './partLineDtoSku';
-import type { PartLineDtoQuantity } from './partLineDtoQuantity';
-import type { PartLineDtoUnitPrice } from './partLineDtoUnitPrice';
-import type { PartLineDtoTotal } from './partLineDtoTotal';
-import type { PartLineDtoTaxRatePercent } from './partLineDtoTaxRatePercent';
-import type { PartLineDtoTaxAmount } from './partLineDtoTaxAmount';
 
 export interface PartLineDto {
   id: string;
   inventoryItemId: string;
   itemName: string;
   sku: PartLineDtoSku;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  quantity: PartLineDtoQuantity;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  unitPrice: PartLineDtoUnitPrice;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  total: PartLineDtoTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  taxRatePercent: PartLineDtoTaxRatePercent;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  taxAmount: PartLineDtoTaxAmount;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  taxRatePercent: number;
+  taxAmount: number;
 }

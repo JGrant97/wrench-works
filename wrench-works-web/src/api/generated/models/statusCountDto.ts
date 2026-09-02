@@ -5,10 +5,8 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { StatusCountDtoCount } from './statusCountDtoCount';
 
 export interface StatusCountDto {
   status: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  count: StatusCountDtoCount;
+  count: number;
 }

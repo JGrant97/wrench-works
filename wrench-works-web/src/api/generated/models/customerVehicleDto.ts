@@ -12,7 +12,6 @@ import type { CustomerVehicleDtoColourName } from './customerVehicleDtoColourNam
 export interface CustomerVehicleDto {
   id: string;
   displayName: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
   year: CustomerVehicleDtoYear;
   registration: CustomerVehicleDtoRegistration;
   colourName: CustomerVehicleDtoColourName;

@@ -5,10 +5,8 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { StockLevelDtoStockOnHand } from './stockLevelDtoStockOnHand';
 
 export interface StockLevelDto {
   id: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  stockOnHand: StockLevelDtoStockOnHand;
+  stockOnHand: number;
 }

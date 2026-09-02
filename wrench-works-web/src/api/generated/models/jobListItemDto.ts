@@ -8,8 +8,6 @@
 import type { JobListItemDtoVehicleDisplay } from './jobListItemDtoVehicleDisplay';
 import type { JobListItemDtoZoneName } from './jobListItemDtoZoneName';
 import type { JobListItemDtoScheduledStartUtc } from './jobListItemDtoScheduledStartUtc';
-import type { JobListItemDtoLaborTotal } from './jobListItemDtoLaborTotal';
-import type { JobListItemDtoPartsTotal } from './jobListItemDtoPartsTotal';
 
 export interface JobListItemDto {
   id: string;
@@ -20,9 +18,7 @@ export interface JobListItemDto {
   vehicleDisplay: JobListItemDtoVehicleDisplay;
   zoneName: JobListItemDtoZoneName;
   scheduledStartUtc: JobListItemDtoScheduledStartUtc;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  laborTotal: JobListItemDtoLaborTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  partsTotal: JobListItemDtoPartsTotal;
+  laborTotal: number;
+  partsTotal: number;
   createdAtUtc: string;
 }

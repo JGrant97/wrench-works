@@ -5,11 +5,9 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { InventoryCategoryDtoItemCount } from './inventoryCategoryDtoItemCount';
 
 export interface InventoryCategoryDto {
   id: string;
   name: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  itemCount: InventoryCategoryDtoItemCount;
+  itemCount: number;
 }

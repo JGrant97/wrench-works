@@ -56,6 +56,24 @@ public class CalendarRepository(AppDbContext db) : ICalendarRepository
         return query.Select(b => b.Id).ToListAsync(ct);
     }
 
+    // SELECT ... FOR UPDATE takes a row lock on the zone and holds it until commit, so a
+    // second request for the same bay blocks at the lock and then re-counts against the
+    // row the first one wrote. Different zones take different locks and never block each
+    // other. Everything work() saves joins this transaction, which also closes the create
+    // path's two-save gap: the booking and its reverse job FK now commit together.
+    public async Task<T> WithZoneLockAsync<T>(Guid zoneId, Func<Task<T>> work, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        await db.Database.ExecuteSqlAsync(
+            $"""SELECT 1 FROM "Zones" WHERE "Id" = {zoneId} FOR UPDATE""", ct);
+
+        var result = await work();
+
+        await transaction.CommitAsync(ct);
+        return result;
+    }
+
     public void AddBooking(Booking booking) => db.Bookings.Add(booking);
     public void AddJob(Job job) => db.Jobs.Add(job);
     public Task SaveChangesAsync(CancellationToken ct) => db.SaveChangesAsync(ct);

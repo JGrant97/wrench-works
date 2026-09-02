@@ -5,12 +5,10 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { AdjustStockRequestQuantityDelta } from './adjustStockRequestQuantityDelta';
 import type { AdjustStockRequestNotes } from './adjustStockRequestNotes';
 
 export interface AdjustStockRequest {
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  quantityDelta: AdjustStockRequestQuantityDelta;
+  quantityDelta: number;
   reason: string;
   notes: AdjustStockRequestNotes;
 }

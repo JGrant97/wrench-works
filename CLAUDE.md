@@ -147,7 +147,13 @@ No raw `fetch` or `axios` against the backend from components, and no hand-writt
 
 **New code fetches through the Orval-generated functions in `@/api/generated/*`**, called from server components or route handlers. Those go through the `apiClient` mutator in `src/lib/api-client.ts`, which reads the httpOnly `ww_token` cookie and attaches the bearer token server-side. Response types come from `@/api/generated/models` — never redeclare them by hand.
 
-> **Current state:** the generated client exists (109 files) but nothing imports it yet. Every existing page uses the legacy pattern — `useApi` / `useApiQuery` from `@/hooks/use-api` hitting the `/api/[...path]` proxy, with response shapes declared as local interfaces inside the page file. **That pattern is legacy, not the model to copy.** Migrate pages to the generated client as you touch them; see "Known gaps" below.
+> **Current state, 2 Sep 2026 — the types are migrated, the fetching is not.**
+>
+> **Every response shape now comes from `@/api/generated/models`.** There are zero hand-written API interfaces left in `src/app`: 19 page-local ones were replaced across 11 pages, and the shared modules (`calendar/_lib/booking.ts`, `jobs/[id]/_lib/job.ts`, `hooks/use-customer-vehicle.ts`) re-export the generated types under their existing names so their consumers were untouched. The models are pure `export interface` with `import type` only, so this is safe inside `"use client"` and adds nothing to the bundle — *verified*: build output byte-identical per route.
+>
+> This is what closes the bug class in [app-flow.md](docs/app-flow.md) — `£NaN` on the jobs list, blank part names, `0 customers` above a populated list — all four were a hand-written interface disagreeing with the real DTO. *Verified the binding is live*: renaming a field usage to one the contract lacks now fails `tsc` with "Property 'capacitySlots' does not exist on type 'ZoneDto'", where the old local interface compiled happily and rendered `undefined`.
+>
+> **Still legacy:** the *fetching*. Pages remain client components calling `useApi`/`useApiQuery` through the `/api/[...path]` proxy rather than the generated functions from server components. That is a bigger change (rule 4) and is unfinished — but the type safety no longer waits on it.
 
 `API_BASE_URL` and `SESSION_SECRET` are server-only env vars. Never expose the JWT or the backend URL to the browser — no `NEXT_PUBLIC_` variable should ever hold either.
 
@@ -406,13 +412,21 @@ The job line-item endpoints load lines from those unfiltered sets and rely on a 
 
 **`static readonly T[]` + `.Contains()` blows up inside a LINQ query.** On .NET 10 the compiler binds an array's `.Contains()` to `MemoryExtensions.Contains(ReadOnlySpan<T>, T)`, which EF Core cannot evaluate as a query parameter — it throws `GenericArguments[1] ... violates the constraint of type parameter 'TRet'` from deep inside the expression funcletizer, and `ErrorHandlingMiddleware` masks it as a bare `500 internal_error`. Declare the set as `List<T>` instead: that binds `Enumerable.Contains` and translates to SQL `IN`. Cost an hour on `DashboardEndpoints`; caught only because `DashboardTests` existed. Related: `GroupBy(x => x.Status).Select(g => g.Key.ToString())` does not translate either — group to the enum, name it in memory.
 
-**The generated client types every number as `number | string`.** The .NET 10 preview OpenAPI generator emits numeric DTO fields with a string validation `pattern`, so Orval widens them. Any page using `@/api/generated/*` has to coerce at the boundary — `dashboard/page.tsx` has a `num()` helper for exactly this. Verified 31 Aug 2026: `decimal RevenueThisMonth` generated as `DashboardDtoRevenueThisMonth = number | string`.
+**RESOLVED 2 Sep 2026 — the generated client no longer widens numbers.** The .NET 10 preview OpenAPI generator emits every int and decimal as `type: ["integer","string"]` (87 of 88 numeric schemas), advertising that it would *accept* a string on input. Orval faithfully turned that into `number | string`, producing 93 unusable alias types — which is the real reason nobody adopted the typed client: every arithmetic expression needed a coercion helper, and `dashboard/page.tsx` grew a `num()` for exactly that.
+
+**Fixed at the spec, not the call sites.** `wrench-works-web/orval.transformer.cjs` collapses those unions before Orval sees them, wired up via `input.override.transformer`. Responses are always real JSON numbers, so the string half was an artifact rather than the contract — *verified on the wire*: `POST /api/zones` returns `"capacity":3` with `typeof === "number"`, and `GET /api/tax/rates` returns `"rate":0.2`.
+
+Nullability is deliberately preserved: a nullable numeric is `["null","integer","string"]`, and an early version of the transformer dropped the `null` along with the string, which would have made `VehicleDto.year` look required. It now yields `VehicleDtoYear = number | null`.
+
+*Result*: `grandTotal: number`, `capacity: number`, zero `number | string` aliases (was 93), and 85 fewer generated files. Delete the transformer once the preview generator stops emitting the union.
 
 **The same OpenAPI generator also chokes on tuple-typed generics in doc comments** — `IEnumerable<(bool, bool, decimal)>` carrying a `<summary>` emits `IEnumerable` with no type argument and fails `CS0305`. Same fix: plain `//`.
 
 **XML doc comments break the build on `Task`-returning helpers.** The .NET 10 preview OpenAPI XML-comment source generator emits `System.Void` for a `Task`-returning (void) method carrying a `<summary>`, failing with `CS0673: System.Void cannot be used from C#` in generated code you never wrote. Use a plain `//` comment on those; `Task<IResult>` and non-async methods are fine. Two helpers in `CalendarEndpoints`/`VehicleEndpoints` carry a note explaining why.
 
 **Environment quirks that cost time once already.** `jq` is **not installed** — use `node` for JSON in scripts and hooks (that's why `.claude/hooks/docs-reminder.mjs` is a Node script). In the Bash tool, backslashes in single-quoted strings and heredocs get mangled, so build JSON test payloads with the Write tool rather than `echo`. When driving the app in the browser, `ref_N`-based clicks resolve to wrong coordinates on this project's modals — click by screenshot coordinate instead, and note `form_input` on `datetime-local` and `<textarea>` fields silently no-ops roughly half the time, so read back and retry.
+
+**Restoring a file from a backup can silently skip the rebuild.** `mv file.bak file.cs` gives the source the *backup*'s mtime. If that is older than the last build output, MSBuild considers the assembly up to date and `dotnet build` reports success while `dotnet test` runs the **previous** binary. This cost real time while verifying the booking lock: the restored fix appeared not to work, and the failing runs were testing the removed version. `touch` the file after any restore, or edit it rather than moving it. `--no-build` makes it worse by hiding the skipped compile entirely.
 
 **No CI, no formatter, no analyzer gate.** There's no `.github/workflows`, no `.editorconfig`, and no `dotnet format` step. Build and test discipline is manual — actually run the commands.
 

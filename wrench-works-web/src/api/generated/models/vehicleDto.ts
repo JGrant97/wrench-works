@@ -34,13 +34,11 @@ export interface VehicleDto {
   customerName: VehicleDtoCustomerName;
   displayName: string;
   variantId: VehicleDtoVariantId;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
   year: VehicleDtoYear;
   makeName: VehicleDtoMakeName;
   modelName: VehicleDtoModelName;
   trim: VehicleDtoTrim;
   bodyStyle: VehicleDtoBodyStyle;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
   engineDisplacementL: VehicleDtoEngineDisplacementL;
   fuelType: VehicleDtoFuelType;
   transmission: VehicleDtoTransmission;

@@ -31,9 +31,10 @@ Exploration only; nothing here is implemented yet. Verified against the running 
 > [review-findings.md](review-findings.md)): `UpdateBookingRequest` and `MoveBookingRequest`
 > have no FluentValidation validators, so an empty GUID returns 404 where the create path
 > returns 400; `PATCH /bookings/{id}/status` can resurrect a `Cancelled` booking that
-> `UpdateBookingAsync` correctly refuses to edit; and `CheckConflictsAsync` is read-then-write
-> with no constraint behind it, so two simultaneous requests can both pass and double-book a
-> capacity-1 bay. The tests listed at the bottom of this file are still unwritten, which is
+> `UpdateBookingAsync` correctly refuses to edit; and `CheckConflictsAsync` was read-then-write
+> with no constraint behind it, so two simultaneous requests could both pass and double-book
+> a capacity-1 bay — **fixed 2 Sep 2026** by a per-zone row lock held across the insert, and
+> pinned by `BookingConcurrencyTests`; see finding 7 in [review-findings.md](review-findings.md). The tests listed at the bottom of this file are still unwritten, which is
 > why none of these were caught.
 
 ## Where it stands

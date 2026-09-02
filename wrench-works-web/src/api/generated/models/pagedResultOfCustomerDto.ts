@@ -6,9 +6,6 @@
  * OpenAPI spec version: v1
  */
 import type { CustomerDto } from './customerDto';
-import type { PagedResultOfCustomerDtoTotal } from './pagedResultOfCustomerDtoTotal';
-import type { PagedResultOfCustomerDtoPage } from './pagedResultOfCustomerDtoPage';
-import type { PagedResultOfCustomerDtoPageSize } from './pagedResultOfCustomerDtoPageSize';
 
 /**
  * The shape every paginated list endpoint returns.
@@ -25,10 +22,7 @@ change — it is the same JSON, now described.
  */
 export interface PagedResultOfCustomerDto {
   items: CustomerDto[];
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  total: PagedResultOfCustomerDtoTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  page: PagedResultOfCustomerDtoPage;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  pageSize: PagedResultOfCustomerDtoPageSize;
+  total: number;
+  page: number;
+  pageSize: number;
 }

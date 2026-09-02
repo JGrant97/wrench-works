@@ -9,12 +9,6 @@
 export type GetApiMessagingParams = {
 customerId?: string;
 jobId?: string;
-/**
- * @pattern ^-?(?:0|[1-9]\d*)$
- */
-page?: number | string;
-/**
- * @pattern ^-?(?:0|[1-9]\d*)$
- */
-pageSize?: number | string;
+page?: number;
+pageSize?: number;
 };

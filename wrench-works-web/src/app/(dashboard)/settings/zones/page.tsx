@@ -11,14 +11,8 @@ import toast from "react-hot-toast";
 import { mutate } from "swr";
 import { ErrorState } from "@/components/data-state";
 import { RecordActions } from "@/components/record-actions";
+import type { ZoneDto as Zone } from "@/api/generated/models";
 
-interface Zone {
-  id: string;
-  name: string;
-  color: string | null;
-  capacity: number;
-  isActive: boolean;
-}
 
 export default function SettingsZonesPage() {
   // The zones endpoints require settings.manage; the page previously offered the

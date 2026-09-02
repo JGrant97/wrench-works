@@ -6,14 +6,12 @@
  * OpenAPI spec version: v1
  */
 import type { ZoneDtoColor } from './zoneDtoColor';
-import type { ZoneDtoCapacity } from './zoneDtoCapacity';
 
 export interface ZoneDto {
   id: string;
   name: string;
   color: ZoneDtoColor;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  capacity: ZoneDtoCapacity;
+  capacity: number;
   isActive: boolean;
   createdAtUtc: string;
 }

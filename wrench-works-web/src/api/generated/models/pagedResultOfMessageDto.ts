@@ -6,9 +6,6 @@
  * OpenAPI spec version: v1
  */
 import type { MessageDto } from './messageDto';
-import type { PagedResultOfMessageDtoTotal } from './pagedResultOfMessageDtoTotal';
-import type { PagedResultOfMessageDtoPage } from './pagedResultOfMessageDtoPage';
-import type { PagedResultOfMessageDtoPageSize } from './pagedResultOfMessageDtoPageSize';
 
 /**
  * The shape every paginated list endpoint returns.
@@ -25,10 +22,7 @@ change — it is the same JSON, now described.
  */
 export interface PagedResultOfMessageDto {
   items: MessageDto[];
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  total: PagedResultOfMessageDtoTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  page: PagedResultOfMessageDtoPage;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  pageSize: PagedResultOfMessageDtoPageSize;
+  total: number;
+  page: number;
+  pageSize: number;
 }

@@ -6,7 +6,4 @@
  * OpenAPI spec version: v1
  */
 
-/**
- * @pattern ^-?(?:0|[1-9]\d*)$
- */
-export type CatalogueVariantDetailDtoEngineCylinders = null | number | string;
+export type CatalogueVariantDetailDtoEngineCylinders = number | null;

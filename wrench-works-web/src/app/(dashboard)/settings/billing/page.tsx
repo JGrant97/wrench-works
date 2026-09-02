@@ -9,16 +9,8 @@ import { formatDate, cn } from "@/lib/utils";
 import { CreditCard, ExternalLink, Check } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import toast from "react-hot-toast";
+import type { SubscriptionDto as Subscription } from "@/api/generated/models";
 
-interface Subscription {
-  plan: string;
-  status: string;
-  currentPeriodEnd: string | null;
-  userLimit: number;
-  zoneLimit: number;
-  inventoryEnabled: boolean;
-  messagingEnabled: boolean;
-}
 
 const PLAN_COLORS: Record<string, string> = {
   Trial: "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300",

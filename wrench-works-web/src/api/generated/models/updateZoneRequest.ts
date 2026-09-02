@@ -6,12 +6,10 @@
  * OpenAPI spec version: v1
  */
 import type { UpdateZoneRequestColor } from './updateZoneRequestColor';
-import type { UpdateZoneRequestCapacity } from './updateZoneRequestCapacity';
 
 export interface UpdateZoneRequest {
   name: string;
   color: UpdateZoneRequestColor;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  capacity: UpdateZoneRequestCapacity;
+  capacity: number;
   isActive: boolean;
 }

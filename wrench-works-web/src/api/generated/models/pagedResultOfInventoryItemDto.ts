@@ -6,9 +6,6 @@
  * OpenAPI spec version: v1
  */
 import type { InventoryItemDto } from './inventoryItemDto';
-import type { PagedResultOfInventoryItemDtoTotal } from './pagedResultOfInventoryItemDtoTotal';
-import type { PagedResultOfInventoryItemDtoPage } from './pagedResultOfInventoryItemDtoPage';
-import type { PagedResultOfInventoryItemDtoPageSize } from './pagedResultOfInventoryItemDtoPageSize';
 
 /**
  * The shape every paginated list endpoint returns.
@@ -25,10 +22,7 @@ change — it is the same JSON, now described.
  */
 export interface PagedResultOfInventoryItemDto {
   items: InventoryItemDto[];
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  total: PagedResultOfInventoryItemDtoTotal;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  page: PagedResultOfInventoryItemDtoPage;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  pageSize: PagedResultOfInventoryItemDtoPageSize;
+  total: number;
+  page: number;
+  pageSize: number;
 }

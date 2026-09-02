@@ -10,7 +10,6 @@ import type { CustomerDtoEmail } from './customerDtoEmail';
 import type { CustomerDtoAddress } from './customerDtoAddress';
 import type { CustomerDtoPreferredContactMethod } from './customerDtoPreferredContactMethod';
 import type { CustomerDtoNotes } from './customerDtoNotes';
-import type { CustomerDtoVehicleCount } from './customerDtoVehicleCount';
 
 export interface CustomerDto {
   id: string;
@@ -20,7 +19,6 @@ export interface CustomerDto {
   address: CustomerDtoAddress;
   preferredContactMethod: CustomerDtoPreferredContactMethod;
   notes: CustomerDtoNotes;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  vehicleCount: CustomerDtoVehicleCount;
+  vehicleCount: number;
   createdAtUtc: string;
 }

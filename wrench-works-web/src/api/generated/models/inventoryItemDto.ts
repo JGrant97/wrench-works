@@ -8,10 +8,7 @@
 import type { InventoryItemDtoSku } from './inventoryItemDtoSku';
 import type { InventoryItemDtoCategoryId } from './inventoryItemDtoCategoryId';
 import type { InventoryItemDtoCategoryName } from './inventoryItemDtoCategoryName';
-import type { InventoryItemDtoUnitCost } from './inventoryItemDtoUnitCost';
 import type { InventoryItemDtoRetailPrice } from './inventoryItemDtoRetailPrice';
-import type { InventoryItemDtoStockOnHand } from './inventoryItemDtoStockOnHand';
-import type { InventoryItemDtoReorderThreshold } from './inventoryItemDtoReorderThreshold';
 
 export interface InventoryItemDto {
   id: string;
@@ -19,14 +16,10 @@ export interface InventoryItemDto {
   sku: InventoryItemDtoSku;
   categoryId: InventoryItemDtoCategoryId;
   categoryName: InventoryItemDtoCategoryName;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  unitCost: InventoryItemDtoUnitCost;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
+  unitCost: number;
   retailPrice: InventoryItemDtoRetailPrice;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  stockOnHand: InventoryItemDtoStockOnHand;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  reorderThreshold: InventoryItemDtoReorderThreshold;
+  stockOnHand: number;
+  reorderThreshold: number;
   lowStock: boolean;
   isConsumable: boolean;
   createdAtUtc: string;

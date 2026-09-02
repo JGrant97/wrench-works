@@ -2,6 +2,11 @@
 
 import { useApiQuery } from "@/hooks/use-api";
 
+// Re-exported from the generated client so these names stay stable for the
+// components that import them, while the shapes come from the API contract.
+import type { CustomerSearchResultDto as CustomerSearchResult, CustomerVehicleDto as CustomerVehicle } from "@/api/generated/models";
+export type { CustomerSearchResult, CustomerVehicle };
+
 /**
  * The customer-then-vehicle pairing every booking and job creation flow needs: search for
  * a customer, then choose one of their vehicles.
@@ -16,17 +21,7 @@ import { useApiQuery } from "@/hooks/use-api";
  * until there is something to fetch.
  */
 
-export interface CustomerSearchResult {
-  id: string;
-  name: string;
-  phone?: string;
-}
 
-export interface CustomerVehicle {
-  id: string;
-  displayName: string;
-  registration?: string;
-}
 
 export function useCustomerVehicle(
   search: string,

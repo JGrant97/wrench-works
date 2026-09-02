@@ -6,7 +6,4 @@
  * OpenAPI spec version: v1
  */
 
-/**
- * @pattern ^-?(?:0|[1-9]\d*)$
- */
-export type VehicleDtoYear = null | number | string;
+export type VehicleDtoYear = number | null;

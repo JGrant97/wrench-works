@@ -6,17 +6,13 @@
  * OpenAPI spec version: v1
  */
 import type { SubscriptionDtoCurrentPeriodEnd } from './subscriptionDtoCurrentPeriodEnd';
-import type { SubscriptionDtoUserLimit } from './subscriptionDtoUserLimit';
-import type { SubscriptionDtoZoneLimit } from './subscriptionDtoZoneLimit';
 
 export interface SubscriptionDto {
   plan: string;
   status: string;
   currentPeriodEnd: SubscriptionDtoCurrentPeriodEnd;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  userLimit: SubscriptionDtoUserLimit;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  zoneLimit: SubscriptionDtoZoneLimit;
+  userLimit: number;
+  zoneLimit: number;
   inventoryEnabled: boolean;
   messagingEnabled: boolean;
 }

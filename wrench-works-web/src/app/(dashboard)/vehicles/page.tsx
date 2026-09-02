@@ -6,6 +6,7 @@ import { useApiQuery } from "@/hooks/use-api";
 import { Card, PageHeader, Spinner, EmptyState } from "@/components/ui";
 import { ErrorState } from "@/components/data-state";
 import { Car, Search } from "lucide-react";
+import type { VehicleSearchResultDto as VehicleResult } from "@/api/generated/models";
 
 /**
  * Vehicle lookup.
@@ -16,14 +17,6 @@ import { Car, Search } from "lucide-react";
  * links straight to the vehicle.
  */
 
-interface VehicleResult {
-  id: string;
-  displayName: string;
-  registration: string | null;
-  vin: string | null;
-  customerId: string;
-  customerName: string;
-}
 
 export default function VehiclesPage() {
   const [search, setSearch] = useState("");

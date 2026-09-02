@@ -168,11 +168,40 @@ and returns `409 { code: "concurrency_conflict" }` with a message telling the us
 *Finding 6 was here and is now under [Fixed](#fixed--31-aug-2026).*
 
 ### 7. Double-booking is possible
-**Reported · pre-existing**
+**Verified · pre-existing · FIXED 2 Sep 2026**
 
-`CalendarEndpoints.cs` `CheckConflictsAsync` reads the overlapping set and compares to capacity; the caller inserts afterwards. Two simultaneous requests both see zero conflicts and both commit. With the current capacity of 1, that is two vehicles in one bay. `Booking.RowVersion` doesn't help — the race is between two *inserts*.
+The conflict check read the overlapping set and compared it to capacity; the caller
+inserted afterwards. Two simultaneous requests both saw zero conflicts and both committed.
+With the usual capacity of 1, that is two vehicles in one bay. `Booking.RowVersion` did not
+help — the race is between two *inserts*, and there is no existing row to version.
 
-**Fix worth considering:** a Postgres exclusion constraint (`EXCLUDE USING gist (ZoneId WITH =, tstzrange(StartUtc, EndUtc) WITH &&) WHERE (Status <> 'Cancelled')`, needs `btree_gist`). That makes it structurally impossible rather than rule-based — the same philosophy already chosen for the vehicle catalogue.
+**Not fixed with an exclusion constraint**, which was the original suggestion here
+(`EXCLUDE USING gist (ZoneId WITH =, tstzrange(StartUtc, EndUtc) WITH &&)`). That forbids
+*any* overlap, and `Zone.Capacity` is configurable 1–10 — a capacity-2 bay legitimately
+takes two cars at once, so the constraint would have made a supported configuration
+unusable. The count has to keep running; it just must never run concurrently for one bay.
+
+**Fixed** with `ICalendarRepository.WithZoneLockAsync`: a transaction that takes
+`SELECT 1 FROM "Zones" WHERE "Id" = @id FOR UPDATE` and holds it through the insert. The
+loser blocks at the lock, then re-counts against the row the winner committed and gets its
+409. Different zones take different locks, so unrelated bays stay parallel. All three write
+paths — create, update and `/move` — go through it.
+
+Two things came free with it: the create path's booking-then-reverse-FK pair now commits
+atomically (that gap is noted in `bookings-crud.md`), and cancelled bookings are still
+excluded from the count as before.
+
+*Verified by `BookingConcurrencyTests`* (4 tests), which fire genuinely parallel requests:
+one booking wins and five get 409s; a capacity-2 bay admits exactly two; different zones
+never block each other; and a sequential control proves plain overlap detection still works
+so the parallel tests cannot pass for the wrong reason. **The suite was confirmed to fail
+without the fix** — six concurrent requests all returned 201 against a capacity-1 bay.
+
+**Still open, and a separate hole:** `JobService.ReviveOrCreateBooking` creates a `Booking`
+directly when a job moves back to `Scheduled`/`InProgress`, with **no conflict check at
+all**. It is the only path that writes a Booking outside the Calendar slice. Routing it
+through the calendar's conflict logic crosses a slice boundary, so it needs a deliberate
+decision rather than a quiet fix.
 
 ### 8. Registration is ~14 sequential saves with no transaction
 **Reported · pre-existing**

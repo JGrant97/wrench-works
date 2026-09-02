@@ -11,8 +11,7 @@ import type {
   CatalogueModelDto,
   CatalogueVariantDetailDto,
   CatalogueVariantDto,
-  GetApiCatalogueModelsModelIdVariantsParams,
-  GetApiCatalogueModelsModelIdYears200Item
+  GetApiCatalogueModelsModelIdVariantsParams
 } from '.././models';
 
 import { apiClient } from '../../../lib/api-client';
@@ -38,7 +37,7 @@ import { apiClient } from '../../../lib/api-client';
   export const getApiCatalogueModelsModelIdYears = (
     modelId: string,
  ) => {
-      return apiClient<GetApiCatalogueModelsModelIdYears200Item[]>(
+      return apiClient<number[]>(
       {url: `/api/catalogue/models/${modelId}/years`, method: 'GET'
     },
       );

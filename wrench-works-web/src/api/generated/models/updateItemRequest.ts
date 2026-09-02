@@ -7,19 +7,14 @@
  */
 import type { UpdateItemRequestSku } from './updateItemRequestSku';
 import type { UpdateItemRequestCategoryId } from './updateItemRequestCategoryId';
-import type { UpdateItemRequestUnitCost } from './updateItemRequestUnitCost';
 import type { UpdateItemRequestRetailPrice } from './updateItemRequestRetailPrice';
-import type { UpdateItemRequestReorderThreshold } from './updateItemRequestReorderThreshold';
 
 export interface UpdateItemRequest {
   name: string;
   sku: UpdateItemRequestSku;
   categoryId: UpdateItemRequestCategoryId;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  unitCost: UpdateItemRequestUnitCost;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
+  unitCost: number;
   retailPrice: UpdateItemRequestRetailPrice;
-  /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  reorderThreshold: UpdateItemRequestReorderThreshold;
+  reorderThreshold: number;
   isConsumable?: boolean;
 }

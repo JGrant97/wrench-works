@@ -5,13 +5,10 @@
  * Workshop management SaaS API
  * OpenAPI spec version: v1
  */
-import type { AddPartToJobRequestQuantity } from './addPartToJobRequestQuantity';
 import type { AddPartToJobRequestUnitPriceOverride } from './addPartToJobRequestUnitPriceOverride';
 
 export interface AddPartToJobRequest {
   inventoryItemId: string;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
-  quantity: AddPartToJobRequestQuantity;
-  /** @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$ */
+  quantity: number;
   unitPriceOverride: AddPartToJobRequestUnitPriceOverride;
 }

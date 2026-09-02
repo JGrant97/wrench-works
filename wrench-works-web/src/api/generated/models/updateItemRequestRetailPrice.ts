@@ -6,7 +6,4 @@
  * OpenAPI spec version: v1
  */
 
-/**
- * @pattern ^-?(?:0|[1-9]\d*)(?:\.\d+)?$
- */
-export type UpdateItemRequestRetailPrice = null | number | string;
+export type UpdateItemRequestRetailPrice = number | null;
