@@ -153,7 +153,7 @@ No raw `fetch` or `axios` against the backend from components, and no hand-writt
 >
 > This is what closes the bug class in [app-flow.md](docs/app-flow.md) — `£NaN` on the jobs list, blank part names, `0 customers` above a populated list — all four were a hand-written interface disagreeing with the real DTO. *Verified the binding is live*: renaming a field usage to one the contract lacks now fails `tsc` with "Property 'capacitySlots' does not exist on type 'ZoneDto'", where the old local interface compiled happily and rendered `undefined`.
 >
-> **Still legacy:** the *fetching*. Pages remain client components calling `useApi`/`useApiQuery` through the `/api/[...path]` proxy rather than the generated functions from server components. That is a bigger change (rule 4) and is unfinished — but the type safety no longer waits on it.
+> **Unchanged: the *fetching*.** Pages remain client components calling `useApi`/`useApiQuery` through the `/api/[...path]` proxy. That is a deliberate trade rather than debt — the proxy is what makes the httpOnly cookie work, and the generated client is server-only so a client component cannot call it. See the Current state note under rule 4 before treating it as something to undo. The type safety above did not wait on it.
 
 `API_BASE_URL` and `SESSION_SECRET` are server-only env vars. Never expose the JWT or the backend URL to the browser — no `NEXT_PUBLIC_` variable should ever hold either.
 
@@ -161,7 +161,33 @@ No raw `fetch` or `axios` against the backend from components, and no hand-writt
 
 Pages and layouts stay server components. Add `"use client"` only where you genuinely need interactivity, hooks, SWR, Zustand, or browser APIs — and push it to the smallest leaf component rather than marking a whole page. Fetch on the server where you can.
 
-> **Current state:** 17 of 20 `page.tsx` / `layout.tsx` files are `"use client"` — every dashboard page. Only `app/layout.tsx`, `app/(auth)/layout.tsx`, and `app/page.tsx` are server components today. These pages predate the rule and are slated for migration; do not treat them as the pattern.
+> **Current state, 2 Sep 2026 — and read this before "migrating" anything.** 18 of 19
+> `page.tsx` files are `"use client"`; `/dashboard` is the one server component, fetching
+> through `getApiDashboard()`, and it is the working example of the target shape.
+>
+> **The `/api/[...path]` proxy is NOT the thing to remove.** It is what turns the httpOnly
+> `ww_token` cookie into an `Authorization` header. Delete it and the JWT has to live
+> somewhere the browser can read, or `API_BASE_URL` has to be exposed. The extra hop is the
+> price of that, and it is the right trade.
+>
+> **A client component physically cannot call a generated function.** `lib/api-client.ts`
+> imports `cookies` from `next/headers`, so it is server-only by construction. Migrating a
+> page therefore means *moving the fetch to the server* and restructuring it into a server
+> parent plus a client child — not swapping `useApi` for `getApiJobs`. That is a real change
+> per page, which is why it has not happened by accident.
+>
+> **Not every page should move.** The calendar needs pointer-driven drag-to-move, job detail
+> runs three modals, inventory filters live. Those are legitimately client components, and
+> converting them wholesale would lose SWR's caching, focus revalidation and `mutate()` for
+> nothing. The pattern that pays is narrower: **a server component fetches the initial
+> payload and hands it to a client child that keeps SWR for interactivity.** Roughly the
+> list pages — jobs, customers, inventory — are where it is worth it.
+>
+> **What it buys is the first paint, not type safety.** Response shapes are already
+> contract-bound (rule 3). What stays hand-written is the *request* side: `useApi` builds
+> URLs and query strings by hand, so a renamed route breaks at runtime rather than at
+> compile time. Real, but smaller than it sounds — and below the open correctness and
+> security items in `review-findings.md`.
 
 ### 5. Vertical slices on the API
 
@@ -390,9 +416,18 @@ Shared across pages rather than within one, so it lives in `src/hooks`: **`useCu
 
 Verified against the code — these are the places where the codebase and the rules above disagree, or where the intent is genuinely undecided.
 
-**Dashboard pages are slated for migration.** Every page under `app/(dashboard)` is a client component fetching via the proxy hooks with hand-written response types. The target is a server component fetching via `@/api/generated/*` with generated models. Migrate opportunistically when you're already working in a page; don't do a big-bang rewrite unprompted. Once a page is migrated, its inline `interface JobDetail`-style declarations should go.
+**Client-side fetching is a deliberate trade, not debt to pay down on sight.** Every page
+under `app/(dashboard)` except `/dashboard` fetches on the client through the proxy hooks.
+Their *response types* now come from `@/api/generated/models`, so the hand-written-interface
+bug class is closed; what remains is that data arrives after hydration, which costs a
+loading spinner on first paint. See the "Current state" note under rule 4 for why this is
+not a find-and-replace, and which pages are actually worth converting.
 
-**`useApi` / `useApiQuery` / the `/api/[...path]` proxy are transitional.** They stay until the pages above are migrated. Don't delete them, and don't build new features on them.
+**`useApi` / `useApiQuery` are the supported way to fetch from a client component.** They
+are not transitional and not deprecated — a client component has no other option, because
+the generated client is server-only. Build new *client* features on them without hesitation.
+Reach for a server component plus `@/api/generated/*` when a page is mostly read-only and
+its first paint matters. The `/api/[...path]` proxy underpins both and stays.
 
 **OPEN QUESTION — `InventoryCategory` tenancy.** It extends `BaseEntity`, not `BusinessScopedEntity`, and has no `HasQueryFilter` line, so categories are shared across every business. `CreateCategoryAsync` (`Features/Inventory/InventoryEndpoints.cs`) then checks name uniqueness with `IgnoreQueryFilters()` globally, so once any business creates "Brakes", every other business gets a 409 and can never create their own. It is undecided whether the shared taxonomy is deliberate or a cross-tenant defect. **Do not "fix" or build on this without asking** — the fix (scope the entity, add a filter, add a migration, scope the uniqueness check) is a breaking data change.
 
@@ -425,6 +460,35 @@ Nullability is deliberately preserved: a nullable numeric is `["null","integer",
 **XML doc comments break the build on `Task`-returning helpers.** The .NET 10 preview OpenAPI XML-comment source generator emits `System.Void` for a `Task`-returning (void) method carrying a `<summary>`, failing with `CS0673: System.Void cannot be used from C#` in generated code you never wrote. Use a plain `//` comment on those; `Task<IResult>` and non-async methods are fine. Two helpers in `CalendarEndpoints`/`VehicleEndpoints` carry a note explaining why.
 
 **Environment quirks that cost time once already.** `jq` is **not installed** — use `node` for JSON in scripts and hooks (that's why `.claude/hooks/docs-reminder.mjs` is a Node script). In the Bash tool, backslashes in single-quoted strings and heredocs get mangled, so build JSON test payloads with the Write tool rather than `echo`. When driving the app in the browser, `ref_N`-based clicks resolve to wrong coordinates on this project's modals — click by screenshot coordinate instead, and note `form_input` on `datetime-local` and `<textarea>` fields silently no-ops roughly half the time, so read back and retry.
+
+**A side effect inside a React state updater fires twice.** `useDragToMove` called
+`onMove(...)` — which issues `PUT /bookings/{id}/move` — from inside a
+`setDrag(current => …)` updater. React treats updaters as pure and **double-invokes them
+under StrictMode** (`next.config.ts` sets `reactStrictMode: true`), so every drop sent two
+identical requests. The first won; the second lost the row-version race and surfaced as
+*"Someone else changed this while you were working on it"* on a move that had in fact
+succeeded. Fixed 2 Sep 2026 by reading `drag?.active` from the effect closure, calling
+`setDrag(null)` plainly, and firing `onMove` outside the updater. *Verified in the browser*:
+one `PUT …/move → 200` per drag across two consecutive drags, toast reads "Booking moved",
+and the stored times moved 15:00→17:00Z and back.
+
+**Read entities INSIDE `WithZoneLockAsync`, never before it.** `MoveBookingAsync` and
+`UpdateBookingAsync` originally loaded the booking before taking the zone lock. An entity
+loaded before the lock carries a concurrency token the race winner may already have bumped,
+so the loser's `UPDATE … WHERE xmin = @original` matches no row and EF raises
+`DbUpdateConcurrencyException` → a 409 the user cannot act on. Both now read the booking,
+zone, customer and vehicle inside the lock. This is what made the double-request bug above
+visible as an error rather than a harmless duplicate — two defects, one symptom.
+
+**A `String.replace` codemod with a shorter second anchor edits the wrong place.** The
+script that added the Consumable checkbox used the create modal's markup as anchor 1 and a
+*substring of it* as anchor 2 for the edit modal. `String.prototype.replace` takes the first
+match, so anchor 2 matched the already-modified create modal: `CreateItemModal` ended up
+with **two** checkboxes (one mis-nested inside the price grid) and `EditItemModal` with
+**none** — it set and submitted `isConsumable` while rendering no control, so the flag could
+never be changed after creation. Fixed and *verified in the browser*: create shows one
+checkbox, edit shows one reflecting the stored value. Anchor codemods on the unique
+surrounding block, and check the count afterwards.
 
 **Restoring a file from a backup can silently skip the rebuild.** `mv file.bak file.cs` gives the source the *backup*'s mtime. If that is older than the last build output, MSBuild considers the assembly up to date and `dotnet build` reports success while `dotnet test` runs the **previous** binary. This cost real time while verifying the booking lock: the restored fix appeared not to work, and the failing runs were testing the removed version. `touch` the file after any restore, or edit it rather than moving it. `--no-build` makes it worse by hiding the skipped compile entirely.
 

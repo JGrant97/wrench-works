@@ -93,25 +93,30 @@ public class CalendarService(ICalendarRepository repository, CurrentUserService 
     /// </summary>
     public async Task<Booking> UpdateBookingAsync(Guid id, UpdateBookingRequest request, CancellationToken ct)
     {
-        var booking = await repository.FindAsync(id, ct)
-            ?? throw new NotFoundException("Booking not found");
-
-        if (booking.Status == BookingStatus.Cancelled)
-            throw new ConflictException("This booking was cancelled and can no longer be edited");
-
         // UpdateBookingRequest has no FluentValidation validator, so these are checked by
-        // hand -- finding 13 in docs/review-findings.md.
+        // hand -- finding 13 in docs/review-findings.md. Request-only, so they run before
+        // the lock is taken.
         if (string.IsNullOrWhiteSpace(request.Title))
             throw new ValidationException([new ValidationFailure(nameof(request.Title), "Title is required")]);
 
         if (request.StartUtc >= request.EndUtc)
             throw new ValidationException([new ValidationFailure(nameof(request.StartUtc), "Start must be before end")]);
 
-        var (zone, _, _) = await ResolveBookingTargetsAsync(
-            request.ZoneId, request.CustomerId, request.VehicleId, ct);
-
         return await repository.WithZoneLockAsync(request.ZoneId, async () =>
         {
+            // Read INSIDE the lock. An entity loaded before it carries a concurrency token
+            // the race winner may already have bumped, so the loser's UPDATE matches no row
+            // and EF raises DbUpdateConcurrencyException -- which reaches the user as
+            // "Someone else changed this" on an edit that had no real conflict.
+            var booking = await repository.FindAsync(id, ct)
+                ?? throw new NotFoundException("Booking not found");
+
+            if (booking.Status == BookingStatus.Cancelled)
+                throw new ConflictException("This booking was cancelled and can no longer be edited");
+
+            var (zone, _, _) = await ResolveBookingTargetsAsync(
+                request.ZoneId, request.CustomerId, request.VehicleId, ct);
+
             await EnsureSlotIsFreeAsync(request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, id, ct);
 
             booking.ZoneId = request.ZoneId;
@@ -157,19 +162,20 @@ public class CalendarService(ICalendarRepository repository, CurrentUserService 
 
     public async Task<Booking> MoveBookingAsync(Guid id, MoveBookingRequest request, CancellationToken ct)
     {
-        var booking = await repository.FindAsync(id, ct)
-            ?? throw new NotFoundException("Booking not found");
-
-        var zone = await repository.FindZoneAsync(request.ZoneId, ct)
-            ?? throw new NotFoundException("Zone not found");
-
         if (request.StartUtc >= request.EndUtc)
             throw new ValidationException([new ValidationFailure(
                 nameof(request.StartUtc), "Start must be before end")]);
 
-        // Drag-to-move is the hot path for conflicts, so it takes the same lock as create.
+        // Drag-to-move is the hot path for conflicts, so it takes the same lock as create --
+        // and, like update, reads everything inside it so the concurrency token is fresh.
         return await repository.WithZoneLockAsync(request.ZoneId, async () =>
         {
+            var booking = await repository.FindAsync(id, ct)
+                ?? throw new NotFoundException("Booking not found");
+
+            var zone = await repository.FindZoneAsync(request.ZoneId, ct)
+                ?? throw new NotFoundException("Zone not found");
+
             await EnsureSlotIsFreeAsync(request.ZoneId, request.StartUtc, request.EndUtc, zone.Capacity, id, ct);
 
             booking.ZoneId = request.ZoneId;

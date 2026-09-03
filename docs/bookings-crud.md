@@ -18,6 +18,13 @@ Exploration only; nothing here is implemented yet. Verified against the running 
 > than rescheduling it by a pixel. Not optimistic: the server can reject the drop as a
 > double-booking, and a block that lands then jumps back is worse than one that waits.
 >
+> **Correction, 2 Sep 2026:** the drag was sending **two** PUTs per drop — `onMove` was
+> called inside a `setDrag` updater, which React double-invokes under StrictMode. The move
+> worked and then a spurious concurrency 409 toast appeared. Fixed on both sides: the side
+> effect moved out of the updater, and the booking is now read inside the zone lock so a
+> stale concurrency token cannot produce a phantom conflict. Re-verified with one
+> `PUT …/move → 200` per drag.
+>
 > *Verified in the browser*, 31 Aug 2026: dragging the "Test" booking from Monday to
 > Wednesday issued `PUT /move` → 200 and the grid re-rendered from the server on the new
 > day. An earlier drag onto an occupied slot returned **409** and the block stayed put —

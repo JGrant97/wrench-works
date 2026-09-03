@@ -146,23 +146,6 @@ function CreateItemModal({ categories, onClose, onCreated }: { categories: Categ
         <div className="grid grid-cols-2 gap-4">
           <Input id="stock" label="Opening Stock" type="number" min="0" value={form.stockOnHand} onChange={u("stockOnHand")} />
           <Input id="reorder" label="Reorder Level" type="number" min="0" value={form.reorderThreshold} onChange={u("reorderThreshold")} />
-        {/* Only affects which tax category a job line takes; consumables still come from
-            stock and still bill as a part line. See docs/tax.md. */}
-        <label className="flex items-start gap-2 text-sm text-surface-700">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={form.isConsumable}
-            onChange={(e) => setForm((f) => ({ ...f, isConsumable: e.target.checked }))}
-          />
-          <span>
-            Consumable
-            <span className="block text-xs text-surface-500">
-              Shop supplies and disposal levies, taxed separately from fitted parts.
-            </span>
-          </span>
-        </label>
-
         </div>
         {/* Only affects which tax category a job line takes; consumables still come from
             stock and still bill as a part line. See docs/tax.md. */}
@@ -226,6 +209,22 @@ function EditItemModal({ item, categories, onClose, onSaved }: { item: Inventory
           <Input id="retailPrice" label={`Retail Price (${symbol})`} type="number" step="0.01" min="0" value={form.retailPrice} onChange={u("retailPrice")} />
         </div>
         <Input id="reorder" label="Reorder Level" type="number" min="0" value={form.reorderThreshold} onChange={u("reorderThreshold")} />
+        {/* Only affects which tax category a job line takes; consumables still come from
+            stock and still bill as a part line. See docs/tax.md. */}
+        <label className="flex items-start gap-2 text-sm text-surface-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={form.isConsumable}
+            onChange={(e) => setForm((f) => ({ ...f, isConsumable: e.target.checked }))}
+          />
+          <span>
+            Consumable
+            <span className="block text-xs text-surface-500">
+              Shop supplies and disposal levies, taxed separately from fitted parts.
+            </span>
+          </span>
+        </label>
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={loading}>Save Changes</Button>

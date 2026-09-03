@@ -80,10 +80,17 @@ export function useDragToMove({
       const start = origin.current;
       origin.current = null;
 
-      setDrag((current) => {
-        // A press that never travelled is a click; the block's onClick opens the booking.
-        if (!start || !current?.active) return null;
+      // A press that never travelled is a click; the block's onClick opens the booking.
+      const wasDragging = drag?.active ?? false;
+      setDrag(null);
 
+      // The PUT is fired HERE, not inside a setDrag updater. React treats updaters as pure
+      // and double-invokes them under StrictMode, so a side effect placed in one sends the
+      // request twice — and the loser of that race surfaced as a spurious "Someone else
+      // changed this while you were working on it" toast on a move that had succeeded.
+      if (!start || !wasDragging) return;
+
+      {
         const deltaMinutes = snapMinutes((e.clientY - start.startY) / HR_PX * 60);
 
         // Which day column the pointer was released over. Reading the DOM is what lets a
@@ -112,9 +119,7 @@ export function useDragToMove({
             new Date(newStart.getTime() + durationMs).toISOString()
           );
         }
-
-        return null;
-      });
+      }
     };
 
     window.addEventListener("pointermove", handleMove);
